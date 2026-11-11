@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>RK-100S Programs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="side">
+    <div class="brand"><span class="korg">KORG</span><span class="model">RK-100S</span></div>
+
+    <div class="conn">
+      <select id="midi-in" title="MIDI In (RK-100S KBD/RIBBON)"><option value="">MIDI In</option></select>
+      <select id="midi-out" title="MIDI Out (RK-100S SOUND)"><option value="">MIDI Out</option></select>
+      <button id="btn-connect">Connect</button>
+      <button id="btn-reload" disabled title="Receive all programs and favorites from the keytar">Load programs</button>
+    </div>
+    <div class="status-line"><span id="conn-status" class="status off">Not connected</span> <span id="status-text"></span></div>
+
+    <div class="caption">CURRENT PROGRAM</div>
+    <div class="lcd" id="lcd">
+      <div id="lcd-category">&nbsp;</div>
+      <div id="lcd-name" class="big">---:--------</div>
+    </div>
+
+    <div class="caption">FAVORITES</div>
+    <table id="fav-table"></table>
+
+    <div class="caption">PROGRAMS</div>
+    <div class="list" id="list" tabindex="0"></div>
+  </aside>
+
+  <main class="details" id="details">
+    <div class="empty">Click a program to see its details.</div>
+  </main>
+
+  <script src="rk100s.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
