@@ -48,6 +48,8 @@
   ];
   // Parameter ID:Sub ID pairs from TABLE 1 (only the ones this app sends).
   const PARAM = {
+    ARP_ON: [0x60, 0x01],                  // 0/1 (from TABLE 1, not yet probed on the keytar)
+    ARP_TYPE: [0x61, 0x00],                // 0~5, see ARP_TYPES (TABLE 5, not yet probed)
     SCALE_TYPE: [0x00, 0x17],              // 0~9, see SCALE_TYPES (from TABLE 1, not yet probed on the keytar)
     SCALE_KEY: [0x00, 0x1E],               // 0~11 = C..B (from TABLE 1, not yet probed on the keytar)
     LONG_RIBBON_SCALE_TYPE: [0x70, 0x00],  // 0~35, see RIBBON_SCALES

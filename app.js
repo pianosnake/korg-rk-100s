@@ -71,7 +71,15 @@
 
   // Program fields that can be changed live on the keytar (PARAMETER CHANGE into the edit buffer).
   const octaves = Array.from({ length: 17 }, (_, k) => k - 8).map((n) => [n, rangeText(n)]);
+  // Arpeggiator as one value: -1 = off, 0..5 = on with that type.
+  const arpValue = (p) => (p.arpOn ? p.arpType : -1);
   const EDITABLE = {
+    arp: {
+      label: 'Arpeggiator',
+      options: [[-1, 'Off'], ...R.ARP_TYPES.map((n, v) => [v, n])],
+      // Off only switches it off (the stored type stays). A type sets the type, then switches it on.
+      messages: (v) => (v < 0 ? [[...R.PARAM.ARP_ON, 0]] : [[...R.PARAM.ARP_TYPE, v], [...R.PARAM.ARP_ON, 1]]),
+    },
     scaleType: { label: 'Scale', param: R.PARAM.SCALE_TYPE, options: R.SCALE_TYPES.map((n, v) => [v, n]) },
     scaleKey: { label: 'Scale key', param: R.PARAM.SCALE_KEY, options: R.KEYS.map((n, v) => [v, n]) },
     ribbonScaleType: { label: 'Long Ribbon scale type', param: R.PARAM.LONG_RIBBON_SCALE_TYPE, options: R.RIBBON_SCALES.map((n, v) => [v, n]) },
@@ -85,7 +93,7 @@
     const stored = i != null ? state.decoded[i] : null;
     if (!stored) { el.innerHTML = '<div class="empty">Click a program to see its details.</div>'; return; }
     const edits = state.edit && state.edit.prog === i && i === state.current ? state.edit.values : {};
-    const p = { ...stored, ...edits };
+    const p = { ...stored, arp: arpValue(stored), ...edits };
 
     // One labelled box, like the old editor: caption above, black LCD value below.
     const field = (caption, value) => `<div class="field"><div class="cap">${esc(caption)}</div><div class="val">${esc(value)}</div></div>`;
@@ -96,22 +104,19 @@
     const section = (title, body, extra = '') =>
       `<section class="sect${extra}"><div class="sect-title">${title}</div><div class="sect-body">${body}</div></section>`;
 
-    const favSlots = (state.favorites || [])
-      .map((prog, k) => (prog === i ? `Bank #${Math.floor(k / 8) + 1} ${'ABCDEFGH'[k % 8]}` : null))
-      .filter(Boolean);
     const anyEdits = Object.keys(edits).length > 0;
 
     el.innerHTML =
       `<div class="det-head"><div class="det-num">${pad3(i + 1)}</div>` +
       `<div><div class="det-name">${esc(p.name.trimEnd())}</div>` +
-      `<div class="det-sub">${i === state.current ? '<span class="badge">ON KEYTAR</span>' : ''}` +
-      `${anyEdits ? ' <span class="edited" title="Write the program on the keytar to keep the changes">EDITED, NOT SAVED</span>' : ''}</div></div></div>` +
+      `<div class="det-sub">` +
+      `${anyEdits ? '<span class="edited" title="Write the program on the keytar to keep the changes">EDITED, NOT SAVED</span>' : ''}</div></div></div>` +
       `<div class="sect-row">` +
       section('PROGRAM', [
         field('VOICE MODE', R.VOICE_MODES[p.voiceMode]),
         field('OCTAVE', signedText(p.octave)),
-        field('ARPEGGIATOR', `${p.arpOn ? 'On' : 'Off'} · ${R.ARP_TYPES[p.arpType] || '?'} · ${R.TIMBRE_SELECT[p.arpTimbre] || '?'}${p.keySync ? ' · Key Sync' : ''}`),
-        field('FAVORITE', favSlots.length ? favSlots.join(', ') : '—'),
+        editor('ARPEGGIATOR', 'arp'),
+        field('ARP TIMBRE', `${R.TIMBRE_SELECT[p.arpTimbre] || '?'}${p.keySync ? ' · Key Sync' : ''}`),
       ].join(''), ' grid2') +
       section('SCALE', [
         editor('SCALE', 'scaleType'),
@@ -161,7 +166,9 @@
   // Remember (or forget, when back to the stored value) an edit-buffer change.
   function noteEdit(i, key, v) {
     if (!state.edit || state.edit.prog !== i) state.edit = { prog: i, values: {} };
-    if (v === state.decoded[i][key]) delete state.edit.values[key]; else state.edit.values[key] = v;
+    const d = state.decoded[i];
+    const base = key === 'arp' ? arpValue(d) : d[key];
+    if (v === base) delete state.edit.values[key]; else state.edit.values[key] = v;
   }
 
   // Change a field in the keytar's edit buffer (PARAMETER CHANGE, func 41h).
@@ -170,7 +177,8 @@
     const f = EDITABLE[key];
     if (!midi.connected) { setStatus('Not connected: cannot change it.'); renderDetails(); return; }
     if (i !== state.current) selectOnKeytar(i); // the edit buffer must hold this program first
-    send(R.msg.parameterChange(midi.channel, f.param[0], f.param[1], v));
+    const msgs = f.messages ? f.messages(v) : [[...f.param, v]];
+    msgs.forEach(([id, sub, val]) => send(R.msg.parameterChange(midi.channel, id, sub, val)));
     noteEdit(i, key, v);
     renderDetails();
     const name = f.options.find(([x]) => x === v)[1];
@@ -222,8 +230,21 @@
       }
       if (m.type === 'param' && state.current != null && state.decoded[state.current]) {
         // A field changed on the keytar itself.
-        const key = Object.keys(EDITABLE).find((k) => EDITABLE[k].param[0] === m.id && EDITABLE[k].param[1] === m.sub);
-        if (key) { noteEdit(state.current, key, m.value); renderDetails(); }
+        const is = ([id, sub]) => m.id === id && m.sub === sub;
+        const cur = state.current;
+        const edits = state.edit && state.edit.prog === cur ? state.edit.values : {};
+        const arpNow = 'arp' in edits ? edits.arp : arpValue(state.decoded[cur]);
+        if (is(R.PARAM.ARP_ON)) {
+          // ARP button: on restores the last known type.
+          noteEdit(cur, 'arp', m.value ? (arpNow >= 0 ? arpNow : state.decoded[cur].arpType) : -1);
+        } else if (is(R.PARAM.ARP_TYPE)) {
+          if (arpNow >= 0) noteEdit(cur, 'arp', m.value);
+        } else {
+          const key = Object.keys(EDITABLE).find((k) => EDITABLE[k].param && is(EDITABLE[k].param));
+          if (!key) return;
+          noteEdit(cur, key, m.value);
+        }
+        renderDetails();
         return;
       }
       // Unsolicited dumps (e.g. from the keytar's MIDI dump page, or after editing favorites).
