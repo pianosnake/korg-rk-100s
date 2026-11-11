@@ -126,17 +126,17 @@
       `<div class="sect-row">` +
       section('LONG RIBBON',
         `<div class="cols">` +
-          `<div>${field('LONG RIBBON TIMBRE SELECT', R.TIMBRE_SELECT[p.ribbonTimbre] || '?')}` +
-          `${editor('LONG RIBBON SCALE TYPE', 'ribbonScaleType')}` +
-          `${field('LONG RIBBON SCALE KEY', ribbonKeyText(p.ribbonScaleKey))}</div>` +
-          `<div>${editor('LONG RIBBON SCALE RANGE', 'ribbonScaleRange')}` +
-          `${editor('LONG RIBBON (PITCH) RANGE', 'ribbonPitchRange')}` +
-          `${field('LONG RIBBON (FILTER) INTENSITY', signedText(p.filterInt))}</div>` +
+          `<div>${field('TIMBRE SELECT', R.TIMBRE_SELECT[p.ribbonTimbre] || '?')}` +
+          `${editor('SCALE TYPE', 'ribbonScaleType')}` +
+          `${field('SCALE KEY', ribbonKeyText(p.ribbonScaleKey))}</div>` +
+          `<div>${editor('SCALE RANGE', 'ribbonScaleRange')}` +
+          `${editor('PITCH RANGE', 'ribbonPitchRange')}` +
+          `${field('FILTER INTENSITY', signedText(p.filterInt))}</div>` +
         `</div>`, ' ribbon') +
       section('SHORT RIBBON', [
-        field('SHORT RIBBON SETTING', p.shortRibbonSetting ? 'Modulation' : 'Pitch'),
-        field('SHORT RIBBON (MODULATION) ASSIGN', `CC#${String(p.shortRibbonAssign).padStart(2, '0')}`),
-        field('SHORT RIBBON (MODULATION) LOCK', p.shortRibbonLock ? 'Lock On' : 'Lock Off'),
+        field('SETTING', p.shortRibbonSetting ? 'Modulation' : 'Pitch'),
+        field('MODULATION ASSIGN', `CC#${String(p.shortRibbonAssign).padStart(2, '0')}`),
+        field('MODULATION LOCK', p.shortRibbonLock ? 'Lock On' : 'Lock Off'),
       ].join(''), ' short') +
       `</div>`;
   }
@@ -220,6 +220,7 @@
     if (d[0] === 0xF0) {
       const m = R.parseSysex(d);
       if (!m) return;
+      if (m.type !== 'identity-other' && m.channel != null && !midi.identified) markIdentified(m.channel);
       if (midi.waiter && midi.waiter.match(m)) {
         const w = midi.waiter; midi.waiter = null; clearTimeout(w.timer); w.resolve(m);
         return;
@@ -271,105 +272,105 @@
   }
 
   async function initMidi() {
-    if (!navigator.requestMIDIAccess) { setStatus('No Web MIDI in this browser. Use Chrome or Edge.'); $('btn-connect').disabled = true; return; }
+    if (!navigator.requestMIDIAccess) { setStatus('No Web MIDI here.'); return; }
     try {
       midi.access = await navigator.requestMIDIAccess({ sysex: true });
     } catch (e) { setStatus(`MIDI access denied (${e.message}). Allow MIDI/SysEx and reload.`); return; }
     midi.access.onstatechange = () => {
-      fillPorts();
       if (midi.connected && (midi.input.state === 'disconnected' || midi.output.state === 'disconnected')) {
-        disconnect(); setStatus('The RK-100S was disconnected.');
+        disconnect(); setStatus('The MIDI device was disconnected.');
       }
-      autoConnect(); // the keytar may have just been plugged in
+      autoConnect(); // a device may have just appeared
     };
-    fillPorts();
   }
 
-  // The keytar's own ports, found by name: In "RK-100S KBD/RIBBON", Out "RK-100S SOUND".
-  function findKeytar() {
+  // Ports to use: the keytar's own ports by name if present
+  // (In "RK-100S KBD/RIBBON", Out "RK-100S SOUND"), otherwise the first connected port.
+  function pickPorts() {
     const pick = (ports, prefer) => {
-      const list = Array.from(ports.values()).filter((p) => /RK-?100S/i.test(p.name) && p.state !== 'disconnected');
-      return list.find((p) => prefer.test(p.name)) || list[0] || null;
+      const list = Array.from(ports.values()).filter((p) => p.state !== 'disconnected');
+      const rk = list.filter((p) => /RK-?100S/i.test(p.name));
+      return rk.find((p) => prefer.test(p.name)) || rk[0] || list[0] || null;
     };
     return { input: pick(midi.access.inputs, /KBD|RIBBON/i), output: pick(midi.access.outputs, /SOUND/i) };
   }
 
-  function fillPorts() {
-    const kt = findKeytar();
-    const fill = (sel, ports, keytarPort, label) => {
-      const cur = sel.value;
-      const list = Array.from(ports.values());
-      sel.innerHTML = `<option value="">${label}</option>` + list.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
-      // Keep the user's choice once connected or picked by hand; otherwise the keytar by name,
-      // otherwise the first port.
-      const keep = (midi.connected || midi.manual) && list.find((p) => p.id === cur);
-      const pickPort = keep || keytarPort || list.find((p) => p.state !== 'disconnected');
-      if (pickPort) sel.value = pickPort.id;
-    };
-    fill($('midi-in'), midi.access.inputs, kt.input, 'MIDI In');
-    fill($('midi-out'), midi.access.outputs, kt.output, 'MIDI Out');
-  }
-
-  // Connect on our own only to ports named RK-100S, and not after the user took over.
   function autoConnect() {
-    if (!midi.access || midi.connected || midi.connecting || midi.manual) return;
-    const kt = findKeytar();
-    if (kt.input && kt.output) {
-      $('midi-in').value = kt.input.id; $('midi-out').value = kt.output.id;
-      connect();
-    } else {
-      setStatus('RK-100S not found. Selected the first ports; change them if needed and press Connect.');
+    if (!midi.access || midi.connecting) return;
+    const { input, output } = pickPorts();
+    if (midi.connected) {
+      // Switch over if better ports showed up (e.g. the keytar was plugged in after another device).
+      if (input === midi.input && output === midi.output) return;
+      disconnect();
     }
+    if (input && output) connect(input, output);
+    else { setConn('No MIDI device', 'off'); setStatus('Waiting for a MIDI device…'); }
   }
 
   function renderButtons() {
-    $('btn-connect').textContent = midi.connected ? 'Disconnect' : 'Connect';
     $('btn-reload').disabled = !midi.connected || state.busy;
     $('btn-reload').textContent = state.programs.length ? 'Reload' : 'Load programs';
   }
 
   function disconnect() {
     if (midi.input) midi.input.onmidimessage = null;
-    midi.input = midi.output = null; midi.connected = false;
+    midi.input = midi.output = null; midi.connected = false; midi.identified = false;
     setConn('Not connected', 'off');
     renderButtons();
   }
 
-  async function connect() {
-    if (midi.connected) { disconnect(); midi.manual = true; return; }
-    if (midi.connecting) return;
-    if (!midi.access) await initMidi();
-    if (!midi.access) return;
-    const input = midi.access.inputs.get($('midi-in').value);
-    const output = midi.access.outputs.get($('midi-out').value);
-    if (!input || !output) { setStatus('Choose MIDI In and MIDI Out first.'); return; }
+  // The keytar answered something on channel ch: it's there and SysEx works both ways.
+  function markIdentified(ch, version) {
+    midi.channel = ch;
+    if (version) midi.version = version;
+    if (!midi.identified || version) setConn(`${midi.version ? `v${midi.version} · ` : ''}ch ${ch + 1}`, 'on');
+    midi.identified = true;
+    $('conn-status').title = `In: ${midi.input?.name} · Out: ${midi.output?.name}`;
+  }
+
+  async function connect(input, output) {
     midi.connecting = true;
     try { await Promise.all([input.open(), output.open()]); } finally { midi.connecting = false; }
     midi.input = input; midi.output = output;
     input.onmidimessage = onMidiMessage;
     midi.connected = true;
-    setConn('Searching…', 'warn'); renderButtons();
+    $('conn-status').title = `In: ${input.name} · Out: ${output.name}`;
+    renderButtons();
+    await handshake();
+  }
+
+  // Find the keytar's global channel. Device Inquiry first; if that gets no answer (some hosts
+  // drop universal SysEx), ask for the edit buffer on channel 1, the default global channel.
+  async function handshake() {
+    setConn('Searching…', 'warn');
     try {
       const id = await request(R.msg.identityRequest(), (m) => m.type === 'identity', { timeout: 1000, retries: 1 });
-      midi.channel = id.channel;
-      setConn(`v${id.version} · ch ${id.channel + 1}`, 'on');
-      // Don't receive the 200 programs on connect; the Load programs / Reload button does that.
-      if (state.programs.length) {
-        await findCurrentProgram();
-        renderAll();
-        if (state.current != null) scrollToRow(state.current);
-        setStatus('Connected. Showing the cached programs; press Reload to receive them again.');
-      } else {
-        setStatus('Connected. Press Load programs to receive the 200 programs.');
-      }
+      markIdentified(id.channel, id.version);
     } catch (e) {
-      setConn('No reply', 'warn');
-      setStatus('No identity reply. In should be KBD/RIBBON, Out should be SOUND.');
+      try {
+        const m = await request(R.msg.currentProgramDumpRequest(0), (x) => x.type === 'current-program', { timeout: 1000, retries: 1 });
+        markIdentified(m.channel);
+      } catch (e2) {
+        if (!midi.identified) {
+          setConn('Send only', 'warn');
+          setStatus(`No SysEx from the keytar on "${midi.input.name}". Program changes are still sent; loading programs needs the keytar's MIDI (with SysEx) routed in.`);
+        }
+        return;
+      }
+    }
+    if (state.programs.length) {
+      await findCurrentProgram();
+      renderAll();
+      if (state.current != null) scrollToRow(state.current);
+      setStatus('Connected. Showing the cached programs; press Reload to receive them again.');
+    } else {
+      setStatus('Connected. Press Load programs to receive the 200 programs.');
     }
   }
 
   async function receiveAll() {
     if (state.busy) return;
+    if (!midi.identified) { await handshake(); if (!midi.identified) return; }
     state.busy = true; renderButtons();
     try {
       setStatus('Receiving favorites…');
@@ -408,9 +409,6 @@
   }
 
   // ------------------------------------------------------------ events
-  $('btn-connect').onclick = () => { if (!midi.connected) midi.manual = false; connect(); };
-  // Picking a port by hand stops auto-connect from overriding it.
-  $('midi-in').onchange = $('midi-out').onchange = () => { midi.manual = true; };
   $('btn-reload').onclick = receiveAll;
   const clicked = (e) => {
     const el = e.target.closest('[data-i]');

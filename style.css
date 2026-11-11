@@ -24,13 +24,12 @@ button, select { font-family: inherit; font-size: 12px; }
 .brand .korg { font: 900 26px/1 "Arial Black", Impact, sans-serif; letter-spacing: -1px; color: #e5d2d2; }
 .brand .model { font: 700 17px/1 Arial, sans-serif; color: #e5d2d2; }
 
-.conn { display: flex; gap: 6px; }
-.conn select { flex: 1; min-width: 0; }
-.conn button {
+#btn-reload {
+  margin-left: auto; align-self: center;
   padding: 2px 8px; border: 1px solid #222; border-radius: 3px; cursor: pointer; color: #fff;
   background: linear-gradient(#8a8a8a, #4b4b4b);
 }
-.conn button:disabled { opacity: .45; cursor: default; }
+#btn-reload:disabled { opacity: .45; cursor: default; }
 .status-line { font-size: 11px; min-height: 18px; display: flex; gap: 6px; align-items: center; color: #f4dede; }
 .status { padding: 1px 7px; border-radius: 9px; white-space: nowrap; }
 .status.off { background: #5b5b5b; color: #ddd; }

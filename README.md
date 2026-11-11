@@ -6,8 +6,8 @@ A stripped-down version of `../rk100s-web`. It never sends whole programs to the
 python3 serve.py          # opens http://localhost:8766 in Google Chrome
 ```
 
-- Always looks for the keytar by port name first (In `RK-100S KBD/RIBBON`, Out `RK-100S SOUND`) and connects on its own, also when it's plugged in later.
-- If it isn't found, the first MIDI In / Out ports are selected (not connected). Change them if needed and press **Connect**. Once you pick a port or press Disconnect, it stops auto-connecting until you press Connect again.
+- No port menus or Connect button (it's meant to run inside an AUv3 host). It uses the keytar's ports by name if present (In `RK-100S KBD/RIBBON`, Out `RK-100S SOUND`), otherwise the first connected In and Out. It reconnects when devices change. Hover the channel pill to see which ports are in use.
+- Handshake: Device Inquiry first. If that gets no answer (some hosts drop universal SysEx), it asks for the edit buffer on channel 1. Any RK-100S SysEx that arrives later also counts. With no SysEx at all the pill says **Send only**: Program Changes still go out, but programs can't be loaded.
 - Connecting only asks for the keytar's identity (and, if programs are cached, its edit buffer to find the current program). Press **Load programs** (later **Reload**) to receive the favorites (global dump) and all 200 programs (about 2 s). They're cached in the browser and shown on the next visit.
 - Follows Program Changes from the keytar. The current program is red in the list and in the favorites grid.
 - Picks up global or program dumps the keytar sends on its own (favorites, programs).
