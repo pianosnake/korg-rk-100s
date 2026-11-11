@@ -93,6 +93,9 @@
       [...header(ch), FUNC.PROGRAM_DUMP_REQUEST, prog & 0x7F, (prog >> 7) & 0x7F, 0xF7],
     currentProgramDump: (ch, data) =>
       [...header(ch), FUNC.CURRENT_PROGRAM_DUMP, ...pack7(Array.from(data)), 0xF7],
+    // PROGRAM WRITE REQUEST (func 11): store the edit buffer into slot prog. 10 bytes, replies 21 (OK) / 22 (error).
+    // Verified for 010 and 140 (the high byte is honoured, despite the spec showing 00).
+    programWriteRequest: (ch, prog) => [...header(ch), FUNC.PROGRAM_WRITE_REQUEST, prog & 0x7F, (prog >> 7) & 0x7F, 0xF7],
     // PROGRAM DATA DUMP (func 4C) to the keytar: saves into Internal Memory slot prog, replies 23 (ACK) / 24 (NAK).
     // packed = the 7-bit dump body exactly as the keytar sent it (keeps its length, dummy bytes included).
     programDumpPacked: (ch, prog, packed) =>

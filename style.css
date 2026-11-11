@@ -110,8 +110,9 @@ button, select { font-family: inherit; font-size: 12px; }
 
 
 .save {
+  -webkit-appearance: none; appearance: none;
   margin-left: 6px; padding: 6px 18px; border: 1px solid #8a6d00; border-radius: 3px; cursor: pointer;
-  background: linear-gradient(#ffd84a, #e0ad00); color: #000; font: 700 13px var(--ui-font); letter-spacing: .5px;
+  background: linear-gradient(#ffd84a, #e0ad00); color: #000; -webkit-text-fill-color: #000; font: 700 13px var(--ui-font); letter-spacing: .5px;
 }
 .save:hover:not(:disabled) { background: linear-gradient(#ffe27a, #f0bf10); }
-.save:disabled { background: #4a4a4a; border-color: #555; color: #888; cursor: default; }
+.save:disabled { background: #4a4a4a; border-color: #555; color: #888; -webkit-text-fill-color: #888; opacity: 1; cursor: default; }

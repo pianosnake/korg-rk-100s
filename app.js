@@ -105,7 +105,7 @@
       `<section class="sect${extra}"><div class="sect-title">${title}</div><div class="sect-body">${body}</div></section>`;
 
     const anyEdits = Object.keys(edits).length > 0;
-    const canSave = anyEdits && midi.identified && !state.busy;
+    const canSave = anyEdits && !state.busy;
 
     el.innerHTML =
       `<div class="det-head"><div class="det-num">${pad3(i + 1)}</div>` +
@@ -187,27 +187,36 @@
 
   const sameBytes = (a, b) => a.length === b.length && a.every((x, k) => x === b[k]);
 
-  // Save the keytar's edit buffer into program slot i. Uses PROGRAM DATA DUMP (4C pp PP), the same
-  // format the keytar itself sends, then reads the slot back to check it landed.
+  // Save the keytar's edit buffer into program slot i with PROGRAM WRITE REQUEST (func 11). It's a 10-byte
+  // message, so it also gets through AUv3 hosts that choke on long outgoing SysEx. Then read the slot back
+  // and check every edited field landed.
   async function saveProgram() {
     const i = state.edit && state.edit.prog;
-    if (i == null || i !== state.current || state.busy || !midi.identified) return;
+    if (i == null || i !== state.current || state.busy) return;
+    if (!midi.identified) await handshake(); // saving needs SysEx both ways
+    if (!midi.identified) {
+      setStatus('Cannot save: no SysEx is coming back from the keytar. Route the keytar\'s MIDI (with SysEx) into this plugin.');
+      return;
+    }
+    const edits = { ...state.edit.values };
     state.busy = true; renderButtons(); renderDetails();
+    const step = async (what, promise) => { try { return await promise; } catch (e) { throw new Error(`no reply ${what}`); } };
     try {
       setStatus(`Saving program ${pad3(i + 1)}…`);
-      const buf = await request(R.msg.currentProgramDumpRequest(midi.channel), (x) => x.type === 'current-program');
-      // A write must not be retried blindly: one attempt, wait for ACK/NAK.
-      const reply = await request(R.msg.programDumpPacked(midi.channel, i, buf.packed),
-        (x) => ['ack', 'nak', 'format-error'].includes(x.type), { timeout: 3000, retries: 0 });
-      if (reply.type === 'nak') throw new Error('the keytar refused the write (is memory protect on?)');
-      if (reply.type === 'format-error') throw new Error('the keytar reported a data format error');
-      const back = await request(R.msg.programDumpRequest(midi.channel, i), (x) => x.type === 'program' && x.number === i);
-      if (!sameBytes(back.data, buf.data)) {
+      // A write must not be retried blindly: one attempt, wait for WRITE COMPLETED / WRITE ERROR.
+      const reply = await step('to the write request', request(R.msg.programWriteRequest(midi.channel, i),
+        (x) => ['write-ok', 'write-error', 'nak', 'format-error'].includes(x.type), { timeout: 3000, retries: 0 }));
+      if (reply.type !== 'write-ok') throw new Error(`the keytar refused the write (${reply.type}; is memory protect on?)`);
+      const back = await step('when reading the program back', request(R.msg.programDumpRequest(midi.channel, i),
+        (x) => x.type === 'program' && x.number === i));
+      const d = R.decodeProgram(back.data);
+      const missing = Object.keys(edits).filter((k) => (k === 'arp' ? arpValue(d) : d[k]) !== edits[k]);
+      if (missing.length) {
         await checkWrongSlot(i);
-        throw new Error(`program ${pad3(i + 1)} did not change on the keytar`);
+        throw new Error(`program ${pad3(i + 1)} on the keytar doesn't have the change (${missing.map((k) => EDITABLE[k].label).join(', ')})`);
       }
       state.programs[i] = back.data;
-      state.decoded[i] = R.decodeProgram(back.data);
+      state.decoded[i] = d;
       state.edit = null;
       persist();
       renderList(); markRows(); renderFavorites();
