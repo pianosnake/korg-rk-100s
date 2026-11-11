@@ -105,12 +105,12 @@
       `<section class="sect${extra}"><div class="sect-title">${title}</div><div class="sect-body">${body}</div></section>`;
 
     const anyEdits = Object.keys(edits).length > 0;
+    const canSave = anyEdits && midi.identified && !state.busy;
 
     el.innerHTML =
       `<div class="det-head"><div class="det-num">${pad3(i + 1)}</div>` +
-      `<div><div class="det-name">${esc(p.name.trimEnd())}</div>` +
-      `<div class="det-sub">` +
-      `${anyEdits ? '<span class="edited" title="Write the program on the keytar to keep the changes">EDITED, NOT SAVED</span>' : ''}</div></div></div>` +
+      `<div class="det-name">${esc(p.name.trimEnd())}</div>` +
+      `<button id="btn-save" class="save"${canSave ? '' : ' disabled'} title="${anyEdits ? `Save the changes into program ${pad3(i + 1)} on the keytar` : 'No changes to save'}">SAVE</button></div>` +
       `<div class="sect-row">` +
       section('PROGRAM', [
         field('VOICE MODE', R.VOICE_MODES[p.voiceMode]),
@@ -183,6 +183,52 @@
     renderDetails();
     const name = f.options.find(([x]) => x === v)[1];
     setStatus(`${f.label} set to ${name}. Write the program on the keytar to keep it.`);
+  }
+
+  const sameBytes = (a, b) => a.length === b.length && a.every((x, k) => x === b[k]);
+
+  // Save the keytar's edit buffer into program slot i. Uses PROGRAM DATA DUMP (4C pp PP), the same
+  // format the keytar itself sends, then reads the slot back to check it landed.
+  async function saveProgram() {
+    const i = state.edit && state.edit.prog;
+    if (i == null || i !== state.current || state.busy || !midi.identified) return;
+    state.busy = true; renderButtons(); renderDetails();
+    try {
+      setStatus(`Saving program ${pad3(i + 1)}…`);
+      const buf = await request(R.msg.currentProgramDumpRequest(midi.channel), (x) => x.type === 'current-program');
+      // A write must not be retried blindly: one attempt, wait for ACK/NAK.
+      const reply = await request(R.msg.programDumpPacked(midi.channel, i, buf.packed),
+        (x) => ['ack', 'nak', 'format-error'].includes(x.type), { timeout: 3000, retries: 0 });
+      if (reply.type === 'nak') throw new Error('the keytar refused the write (is memory protect on?)');
+      if (reply.type === 'format-error') throw new Error('the keytar reported a data format error');
+      const back = await request(R.msg.programDumpRequest(midi.channel, i), (x) => x.type === 'program' && x.number === i);
+      if (!sameBytes(back.data, buf.data)) {
+        await checkWrongSlot(i);
+        throw new Error(`program ${pad3(i + 1)} did not change on the keytar`);
+      }
+      state.programs[i] = back.data;
+      state.decoded[i] = R.decodeProgram(back.data);
+      state.edit = null;
+      persist();
+      renderList(); markRows(); renderFavorites();
+      setStatus(`Saved program ${pad3(i + 1)}.`);
+    } catch (e) {
+      setStatus(`Save failed: ${e.message}`);
+    } finally {
+      state.busy = false; renderButtons(); renderDetails();
+    }
+  }
+
+  // Safety net for programs 129-200: if the keytar ignored the program number's high byte it wrote
+  // into slot i-128 instead. Detect that against our loaded copy and put the old program back.
+  async function checkWrongSlot(i) {
+    const j = i & 0x7F;
+    if (j === i || !state.programs[j]) return;
+    const m = await request(R.msg.programDumpRequest(midi.channel, j), (x) => x.type === 'program' && x.number === j);
+    if (sameBytes(m.data, state.programs[j])) return;
+    await request(R.msg.programDumpPacked(midi.channel, j, R.pack7(Array.from(state.programs[j]))),
+      (x) => ['ack', 'nak', 'format-error'].includes(x.type), { timeout: 3000, retries: 0 });
+    setStatus(`Program ${pad3(j + 1)} was overwritten by mistake and has been restored.`);
   }
 
   function setCurrent(i, { scroll = true } = {}) {
@@ -433,6 +479,7 @@
   // List click selects the program on the keytar; the favorites grid and arrow keys only show details.
   $('list').onclick = (e) => { const i = clicked(e); if (i != null) selectOnKeytar(i); };
   $('fav-table').onclick = (e) => { const i = clicked(e); if (i != null) view(i); };
+  $('details').onclick = (e) => { if (e.target.id === 'btn-save') saveProgram(); };
   $('details').onchange = (e) => {
     const key = e.target.dataset.field;
     if (key) setField(state.viewed, key, +e.target.value);

@@ -48,10 +48,10 @@
   ];
   // Parameter ID:Sub ID pairs from TABLE 1 (only the ones this app sends).
   const PARAM = {
-    ARP_ON: [0x60, 0x01],                  // 0/1 (from TABLE 1, not yet probed on the keytar)
-    ARP_TYPE: [0x61, 0x00],                // 0~5, see ARP_TYPES (TABLE 5, not yet probed)
-    SCALE_TYPE: [0x00, 0x17],              // 0~9, see SCALE_TYPES (from TABLE 1, not yet probed on the keytar)
-    SCALE_KEY: [0x00, 0x1E],               // 0~11 = C..B (from TABLE 1, not yet probed on the keytar)
+    ARP_ON: [0x60, 0x01],                  // 0/1
+    ARP_TYPE: [0x61, 0x00],                // 0~5, see ARP_TYPES
+    SCALE_TYPE: [0x00, 0x17],              // 0~9, see SCALE_TYPES
+    SCALE_KEY: [0x00, 0x1E],               // 0~11 = C..B
     LONG_RIBBON_SCALE_TYPE: [0x70, 0x00],  // 0~35, see RIBBON_SCALES
     LONG_RIBBON_SCALE_RANGE: [0x70, 0x01], // -8~+8 octaves (plain signed value, no +64 offset)
     LONG_RIBBON_PITCH_RANGE: [0x70, 0x02], // -8~+8 octaves
@@ -93,6 +93,10 @@
       [...header(ch), FUNC.PROGRAM_DUMP_REQUEST, prog & 0x7F, (prog >> 7) & 0x7F, 0xF7],
     currentProgramDump: (ch, data) =>
       [...header(ch), FUNC.CURRENT_PROGRAM_DUMP, ...pack7(Array.from(data)), 0xF7],
+    // PROGRAM DATA DUMP (func 4C) to the keytar: saves into Internal Memory slot prog, replies 23 (ACK) / 24 (NAK).
+    // packed = the 7-bit dump body exactly as the keytar sent it (keeps its length, dummy bytes included).
+    programDumpPacked: (ch, prog, packed) =>
+      [...header(ch), FUNC.PROGRAM_DUMP, prog & 0x7F, (prog >> 7) & 0x7F, ...packed, 0xF7],
     // PARAMETER CHANGE (NOTE 4): 14-bit ID, sub ID and signed value, LSB first.
     parameterChange: (ch, id, sub, value) =>
       [...header(ch), FUNC.PARAMETER_CHANGE, id & 0x7F, (id >> 7) & 0x7F, sub & 0x7F, (sub >> 7) & 0x7F,
@@ -125,9 +129,9 @@
     const body = d.slice(7, d.length - 1); // strip func + F7
     switch (func) {
       case FUNC.PROGRAM_DUMP:
-        return { type: 'program', channel, number: body[0] | (body[1] << 7), data: unpack7(body.slice(2)).slice(0, PROGRAM_SIZE) };
+        return { type: 'program', channel, number: body[0] | (body[1] << 7), data: unpack7(body.slice(2)).slice(0, PROGRAM_SIZE), packed: body.slice(2) };
       case FUNC.CURRENT_PROGRAM_DUMP:
-        return { type: 'current-program', channel, data: unpack7(body).slice(0, PROGRAM_SIZE) };
+        return { type: 'current-program', channel, data: unpack7(body).slice(0, PROGRAM_SIZE), packed: body };
       case FUNC.GLOBAL_DUMP:
         return { type: 'global', channel, data: unpack7(body).slice(0, GLOBAL_SIZE) };
       case FUNC.PARAMETER_CHANGE:
