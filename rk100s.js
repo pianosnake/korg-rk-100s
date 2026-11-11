@@ -48,6 +48,8 @@
   ];
   // Parameter ID:Sub ID pairs from TABLE 1 (only the ones this app sends).
   const PARAM = {
+    SCALE_TYPE: [0x00, 0x17],              // 0~9, see SCALE_TYPES (from TABLE 1, not yet probed on the keytar)
+    SCALE_KEY: [0x00, 0x1E],               // 0~11 = C..B (from TABLE 1, not yet probed on the keytar)
     LONG_RIBBON_SCALE_TYPE: [0x70, 0x00],  // 0~35, see RIBBON_SCALES
     LONG_RIBBON_SCALE_RANGE: [0x70, 0x01], // -8~+8 octaves (plain signed value, no +64 offset)
     LONG_RIBBON_PITCH_RANGE: [0x70, 0x02], // -8~+8 octaves

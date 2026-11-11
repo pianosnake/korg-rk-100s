@@ -23,13 +23,6 @@
   function setStatus(t) { $('status-text').textContent = t; }
   function setConn(text, cls) { const el = $('conn-status'); el.textContent = text; el.className = `status ${cls}`; }
 
-  function renderLcd() {
-    const i = state.current;
-    const p = i != null ? state.decoded[i] : null;
-    $('lcd-category').textContent = p ? R.CATEGORIES[p.category] : ' ';
-    $('lcd-name').textContent = p ? `${pad3(i + 1)}:${p.name.trimEnd()}` : i != null ? `${pad3(i + 1)}:` : '---:--------';
-  }
-
   function renderFavorites() {
     const favs = state.favorites;
     let html = '<tr><th></th>' + 'ABCDEFGH'.split('').map((c) => `<th>${c}</th>`).join('') + '</tr>';
@@ -79,6 +72,8 @@
   // Program fields that can be changed live on the keytar (PARAMETER CHANGE into the edit buffer).
   const octaves = Array.from({ length: 17 }, (_, k) => k - 8).map((n) => [n, rangeText(n)]);
   const EDITABLE = {
+    scaleType: { label: 'Scale', param: R.PARAM.SCALE_TYPE, options: R.SCALE_TYPES.map((n, v) => [v, n]) },
+    scaleKey: { label: 'Scale key', param: R.PARAM.SCALE_KEY, options: R.KEYS.map((n, v) => [v, n]) },
     ribbonScaleType: { label: 'Long Ribbon scale type', param: R.PARAM.LONG_RIBBON_SCALE_TYPE, options: R.RIBBON_SCALES.map((n, v) => [v, n]) },
     ribbonScaleRange: { label: 'Long Ribbon scale range', param: R.PARAM.LONG_RIBBON_SCALE_RANGE, options: octaves },
     ribbonPitchRange: { label: 'Long Ribbon (pitch) range', param: R.PARAM.LONG_RIBBON_PITCH_RANGE, options: octaves },
@@ -120,8 +115,8 @@
         field('FAVORITE', favSlots.length ? favSlots.join(', ') : '—'),
       ].join(''), ' grid3') +
       section('SCALE', [
-        field('SCALE', R.SCALE_TYPES[p.scaleType] || '?'),
-        field('SCALE KEY', R.KEYS[p.scaleKey] || '?'),
+        editor('SCALE', 'scaleType'),
+        editor('SCALE KEY', 'scaleKey'),
       ].join(''), ' grid1') +
       `<div class="sect-row">` +
       section('LONG RIBBON',
@@ -141,7 +136,7 @@
       `</div>`;
   }
 
-  function renderAll() { renderLcd(); renderFavorites(); renderList(); renderDetails(); }
+  function renderAll() { renderFavorites(); renderList(); renderDetails(); }
 
   function scrollToRow(i) {
     const el = $('list').querySelector(`.row[data-i="${i}"]`);
@@ -186,7 +181,7 @@
     state.current = i;
     state.edit = null; // a program change reloads the stored program
     state.viewed = i; // details follow the keytar
-    renderLcd(); markRows(); renderFavorites(); renderDetails();
+    markRows(); renderFavorites(); renderDetails();
     if (scroll) scrollToRow(i);
   }
 
