@@ -101,7 +101,12 @@ button, select { font-family: inherit; font-size: 12px; }
   display: block; width: 100%; background: #000; color: #f4f4f4; border: 1px solid #555; border-radius: 0;
   font: 12px var(--lcd-font); padding: 2px 6px; min-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.field select.val { cursor: pointer; padding: 1px 3px; appearance: auto; }
+/* Native dropdown styling off: WebKit/iOS draw their own control and ignore our borders (no yellow edit outline). */
+.field select.val {
+  cursor: pointer; padding: 2px 22px 2px 6px; -webkit-appearance: none; appearance: none;
+  background: #000 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23bbb'/%3E%3C/svg%3E") no-repeat right 7px center;
+  line-height: 14px;
+}
 .field select.val:hover { border-color: #aaa; }
 .field.modified .val { border-color: #f5c400; box-shadow: 0 0 0 1px #f5c400; }
 
