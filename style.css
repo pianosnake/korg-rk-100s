@@ -88,8 +88,8 @@ button, select { font-family: inherit; font-size: 12px; }
   padding: 3px 30px 3px 8px; clip-path: polygon(0 0, 100% 0, calc(100% - 18px) 100%, 0 100%);
 }
 .sect-body { padding: 10px 14px 12px; }
-.sect.grid3 .sect-body { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 18px; }
-.sect.grid1 .sect-body { display: grid; grid-template-columns: minmax(0, 260px); gap: 4px; }
+.sect.grid2 .sect-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 18px; }
+.sect.grid1 .sect-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sect-row { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; max-width: 820px; margin-bottom: 18px; }
 .sect-row .sect { max-width: none; margin-bottom: 0; }
 .sect.ribbon .cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }

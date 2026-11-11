@@ -106,18 +106,18 @@
       `<div><div class="det-name">${esc(p.name.trimEnd())}</div>` +
       `<div class="det-sub">${i === state.current ? '<span class="badge">ON KEYTAR</span>' : ''}` +
       `${anyEdits ? ' <span class="edited" title="Write the program on the keytar to keep the changes">EDITED, NOT SAVED</span>' : ''}</div></div></div>` +
+      `<div class="sect-row">` +
       section('PROGRAM', [
-        field('CATEGORY', R.CATEGORIES[p.category]),
         field('VOICE MODE', R.VOICE_MODES[p.voiceMode]),
         field('OCTAVE', signedText(p.octave)),
-        field('TEMPO', `${p.tempo} BPM`),
         field('ARPEGGIATOR', `${p.arpOn ? 'On' : 'Off'} · ${R.ARP_TYPES[p.arpType] || '?'} · ${R.TIMBRE_SELECT[p.arpTimbre] || '?'}${p.keySync ? ' · Key Sync' : ''}`),
         field('FAVORITE', favSlots.length ? favSlots.join(', ') : '—'),
-      ].join(''), ' grid3') +
+      ].join(''), ' grid2') +
       section('SCALE', [
         editor('SCALE', 'scaleType'),
         editor('SCALE KEY', 'scaleKey'),
       ].join(''), ' grid1') +
+      `</div>` +
       `<div class="sect-row">` +
       section('LONG RIBBON',
         `<div class="cols">` +
