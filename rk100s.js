@@ -74,9 +74,24 @@
     // Timbre parameter ID = timbre * 0x10 + (block + 1): "+0:ss" = 11/21, "+1:ss" = 12/22 (verified on the keytar;
     // the spec's "1x"/"2x" doesn't say this).
     T1_LONG_RIBBON_FILTER_INT: [0x12, 0x16],
+    T1_OSC1_WAVE: [0x11, 0x17],            // 0~7, see OSC1_WAVES
+    T1_OSC1_PCM_WAVE: [0x11, 0x1B],        // 0~84, see PCM_WAVES (spec says 0~64; the keytar takes 0~84)
     T2_LONG_RIBBON_FILTER_INT: [0x22, 0x16],
   };
   const ARP_TYPES = ['Up', 'Down', 'Alt1', 'Alt2', 'Random', 'Trigger'];
+  const OSC1_WAVES = ['Saw', 'Pulse', 'Triangle', 'Sine', 'Formant', 'Noise', 'PCM/DWGS', 'Audio In'];
+  // PCM/DWGS waves 0~84, names as in the KORG Sound Editor (its *SynthPcm table). 131 M1 Piano = 0, 132 ToyPiano = 1.
+  const PCM_WAVES = [
+    'M1 Piano', 'ToyPiano', 'REP Wave', 'WEP Wave', 'Digi EP 1', 'Digi EP 2', 'M1 Clav', 'ClavWave', 'M1 Org 1', 'M1 Org 2',
+    'DW Org1', 'DW Org2', 'VOX Org1', 'VOX Org2', 'VOX Org3', 'VOX Org4', 'ReedKey1', 'ReedKey2', 'KeyFlute', 'Strings',
+    'OctBrass', 'Bell 1', 'Bell 2', 'Bell 3', 'Bell 4', 'M1 Bell', 'VPMBell1', 'VPMBell2', 'Ens Bell', 'Karimba',
+    'EP Pad', 'VoxPad1', 'VoxPad2', 'GhostPad', 'MagicOrg', 'Zingle 1', 'Zingle 2', 'Twinkler', 'Xylo Pad', 'MetalHit',
+    'Pop', 'PickBass', 'Vox Bass', 'A.BsNoiz', 'DJ Horn', 'SynSine1', 'SynSine2', 'SynSine3', 'SynSine4', 'SynSine5',
+    'SynSine6', 'SynSine7', 'Chip Tri', 'ChipPls1', 'ChipPls2', 'Chip Squ', 'SynWave1', 'SynWave2', 'SynWave3', 'SynWave4',
+    'SynWave5', 'SynWave6', 'SynWave7', 'SynWire1', 'SynWire2', 'SynWire3', 'SynWire4', '5th Saw', '5th Squ', 'Digi 1',
+    'Digi 2', 'Digi 3', 'Digi 4', 'Digi 5', 'Digi 6', 'Digi 7', 'Digi 8', 'Digi 9', 'SynVox1', 'SynVox2',
+    'Endless', 'Noise 1', 'Noise 2', 'Noise 3', 'Noise 4',
+  ];
   const ARP_RESOLUTIONS = ['1/32', '1/24', '1/16', '1/12', '1/8', '1/6', '1/4', '1/2', '1/1'];
 
   // ---- 8-bit <-> 7-bit dump conversion (NOTE 3) --------------------------
@@ -212,6 +227,8 @@
       category: d[351] & 0x0F,
       filterInt: ribbonTimbre === 1 ? t2FilterInt : t1FilterInt,
       t1FilterInt, t2FilterInt,
+      t1Wave: d[16 + 16] & 0x0F,           // timbre 1 OSC1 wave type
+      t1PcmWave: d[16 + 19],               // timbre 1 PCM/DWGS wave (when the wave is PCM/DWGS)
     };
   }
 
@@ -261,7 +278,7 @@
 
   global.RK100S = {
     PROGRAM_SIZE, GLOBAL_SIZE, NUM_PROGRAMS, FUNC,
-    CATEGORIES, VOICE_MODES, TIMBRE_SELECT, SCALE_TYPES, KEYS, RIBBON_SCALES, ARP_TYPES, ARP_RESOLUTIONS, PARAM,
+    CATEGORIES, VOICE_MODES, TIMBRE_SELECT, SCALE_TYPES, KEYS, RIBBON_SCALES, ARP_TYPES, ARP_RESOLUTIONS, OSC1_WAVES, PCM_WAVES, PARAM,
     unpack7, pack7, msg, parseSysex, decodeProgram, decodeGlobal, parseLibraryFile,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

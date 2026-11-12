@@ -91,6 +91,9 @@
       enabled: (p) => p.voiceMode === 3 },
     keySync: { label: 'Arpeggiator key sync', param: R.PARAM.ARP_KEY_SYNC, options: [[0, 'Off'], [1, 'On']] },
     arpLatch: { label: 'Arpeggiator latch', param: R.PARAM.ARP_LATCH, options: [[0, 'Off'], [1, 'On']] },
+    t1Wave: { label: 'Timbre 1 wave', param: R.PARAM.T1_OSC1_WAVE, options: R.OSC1_WAVES.map((n, v) => [v, n]) },
+    t1PcmWave: { label: 'Timbre 1 wave select', param: R.PARAM.T1_OSC1_PCM_WAVE, options: R.PCM_WAVES.map((n, v) => [v, n]),
+      enabled: (p) => p.t1Wave === 6 }, // only for PCM/DWGS
     arpResolution: { label: 'Arpeggiator resolution', param: R.PARAM.ARP_RESOLUTION, options: R.ARP_RESOLUTIONS.map((n, v) => [v, n]) },
     arpLastStep: { label: 'Arpeggiator last step', param: R.PARAM.ARP_LAST_STEP, options: [0, 1, 2, 3, 4, 5, 6, 7].map((v) => [v, String(v + 1)]) },
     arpOctRange: { label: 'Arpeggiator octave range', param: R.PARAM.ARP_OCTAVE_RANGE, options: [0, 1, 2, 3].map((v) => [v, String(v + 1)]) },
@@ -209,6 +212,10 @@
         editor('MODULATION ASSIGN', 'shortRibbonAssign'),
         checkbox('MODULATION LOCK', 'shortRibbonLock'),
       ].join(''), ' short') +
+      section('TIMBRE 1', [
+        editor('WAVE', 't1Wave'),
+        editor('WAVE SELECT', 't1PcmWave'),
+      ].join(''), ' grid1') +
       `</div>`;
   }
 
