@@ -91,6 +91,8 @@
       enabled: (p) => p.voiceMode === 3 },
     keySync: { label: 'Arpeggiator key sync', param: R.PARAM.ARP_KEY_SYNC, options: [[0, 'Off'], [1, 'On']] },
     arpLatch: { label: 'Arpeggiator latch', param: R.PARAM.ARP_LATCH, options: [[0, 'Off'], [1, 'On']] },
+    arpResolution: { label: 'Arpeggiator resolution', param: R.PARAM.ARP_RESOLUTION, options: R.ARP_RESOLUTIONS.map((n, v) => [v, n]) },
+    arpLastStep: { label: 'Arpeggiator last step', param: R.PARAM.ARP_LAST_STEP, options: [0, 1, 2, 3, 4, 5, 6, 7].map((v) => [v, String(v + 1)]) },
     arpOctRange: { label: 'Arpeggiator octave range', param: R.PARAM.ARP_OCTAVE_RANGE, options: [0, 1, 2, 3].map((v) => [v, String(v + 1)]) },
     // Step 1~8 on/off (STEP EDIT buttons; not drawn by editor()).
     ...Object.fromEntries(Array.from({ length: 8 }, (_, k) => [`arpStep${k}`,
@@ -187,10 +189,12 @@
       section('ARPEGGIATOR', [
         editor('TYPE', 'arp'),
         editor('TIMBRE', 'arpTimbre'),
+        editor('RESOLUTION', 'arpResolution'),
         editor('OCTAVE RANGE', 'arpOctRange'),
+        editor('LAST STEP', 'arpLastStep'),
         `<div class="pair">${checkbox('LATCH', 'arpLatch')}${checkbox('KEY SYNC', 'keySync')}</div>`,
         stepEdit(),
-      ].join(''), ' grid2 span2') +
+      ].join(''), ' grid3 span3') +
       section('LONG RIBBON',
         `<div class="cols">` +
           `<div>${editor('TIMBRE SELECT', 'ribbonTimbre')}` +

@@ -82,13 +82,15 @@ button, select { font-family: inherit; font-size: 12px; }
 .details .empty { margin-top: 20vh; }
 
 /* Sections styled after the old Sound Editor panels: red tab title, dark body, LCD value boxes. */
-.sect { max-width: 820px; margin-bottom: 18px; border: 1px solid #444; background: linear-gradient(#3a3a3a, #262626); }
+.sect { max-width: 820px; margin-bottom: 18px; border: 1px solid #444; border-top: 2px solid var(--red); background: linear-gradient(#3a3a3a, #262626); }
+/* The red top border runs from the tab title to the right edge (like the STEP EDIT strip). */
 .sect-title {
   display: inline-block; background: var(--red); color: #fff; font: 700 12px var(--ui-font); letter-spacing: .5px;
   padding: 3px 30px 3px 8px; clip-path: polygon(0 0, 100% 0, calc(100% - 18px) 100%, 0 100%);
 }
 .sect-body { padding: 10px 14px 12px; }
 .sect.grid2 .sect-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 18px; }
+.sect.grid3 .sect-body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 18px; }
 /* STEP EDIT strip inside ARPEGGIATOR (spans both columns). Buttons need appearance: none for WebKit. */
 .step-edit { grid-column: 1 / -1; margin: 10px -14px -12px; padding: 0 14px 12px; border-top: 2px solid var(--red); }
 .sub-title {
@@ -96,7 +98,8 @@ button, select { font-family: inherit; font-size: 12px; }
   padding: 2px 26px 3px 8px; margin: 0 0 8px -14px; clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
 }
 .step-row { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; }
-.step-row .steps { display: flex; gap: 6px; margin-left: 12px; flex-wrap: wrap; }
+/* The 8 steps stay on one line; they shrink (down to 16px) rather than wrap. */
+.step-row .steps { flex: 1 1 auto; display: grid; grid-template-columns: repeat(8, minmax(16px, 30px)); gap: 6px; margin-left: 12px; }
 .step-row button {
   -webkit-appearance: none; appearance: none; margin: 0; cursor: pointer; font-family: var(--ui-font); padding: 0;
 }
@@ -108,7 +111,7 @@ button, select { font-family: inherit; font-size: 12px; }
 .step { display: flex; flex-direction: column; align-items: center; gap: 3px; background: none; border: 0; }
 .step .n { font: 700 11px var(--ui-font); color: #d8d8d8; -webkit-text-fill-color: #d8d8d8; }
 .step .led {
-  width: 30px; height: 22px; border-radius: 3px; border: 1px solid #111;
+  width: 100%; height: 22px; border-radius: 3px; border: 1px solid #111;
   background: linear-gradient(#4a4a4a, #2c2c2c); box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
 }
 .step.on .led { background: linear-gradient(#e0505a, #a8121f); box-shadow: 0 0 6px rgba(230, 40, 50, .5), inset 0 1px 0 rgba(255,255,255,.25); }
@@ -127,6 +130,7 @@ button, select { font-family: inherit; font-size: 12px; }
 @media (min-width: 890px) {
   .sect-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sect-grid .span2 { grid-column: span 2; }
+  .sect-grid .span3 { grid-column: 1 / -1; }
 }
 .sect.ribbon .cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
 .sect.short .sect-body { display: flex; flex-direction: column; gap: 4px; }
@@ -180,8 +184,11 @@ button, select { font-family: inherit; font-size: 12px; }
 @container (max-width: 420px) {
   .det-head .save { margin-left: 0; }
 }
+@container (max-width: 520px) {
+  .sect.grid3 .sect-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @container (max-width: 360px) {
-  .sect.grid2 .sect-body, .sect.ribbon .cols { grid-template-columns: minmax(0, 1fr); }
+  .sect.grid2 .sect-body, .sect.grid3 .sect-body, .sect.ribbon .cols { grid-template-columns: minmax(0, 1fr); }
   .sect.ribbon .cols { gap: 4px; }
 }
 @media (max-width: 760px) {

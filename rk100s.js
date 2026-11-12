@@ -57,6 +57,8 @@
     ARP_KEY_SYNC: [0x60, 0x02],            // 0/1
     ARP_LATCH: [0x61, 0x06],               // 0/1
     ARP_OCTAVE_RANGE: [0x61, 0x02],        // 0~3 = 1~4 octaves
+    ARP_RESOLUTION: [0x61, 0x01],          // 0~8 = 1/32, 1/24, 1/16, 1/12, 1/8, 1/6, 1/4, 1/2, 1/1
+    ARP_LAST_STEP: [0x61, 0x03],           // 0~7 = step 1~8
     ARP_STEP: (k) => [0x61, 0x10 + k],     // step k+1 on/off, k = 0~7
     SCALE_TYPE: [0x00, 0x17],              // 0~9, see SCALE_TYPES
     SCALE_KEY: [0x00, 0x1E],               // 0~11 = C..B
@@ -75,6 +77,7 @@
     T2_LONG_RIBBON_FILTER_INT: [0x22, 0x16],
   };
   const ARP_TYPES = ['Up', 'Down', 'Alt1', 'Alt2', 'Random', 'Trigger'];
+  const ARP_RESOLUTIONS = ['1/32', '1/24', '1/16', '1/12', '1/8', '1/6', '1/4', '1/2', '1/1'];
 
   // ---- 8-bit <-> 7-bit dump conversion (NOTE 3) --------------------------
   function unpack7(bytes) {
@@ -258,7 +261,7 @@
 
   global.RK100S = {
     PROGRAM_SIZE, GLOBAL_SIZE, NUM_PROGRAMS, FUNC,
-    CATEGORIES, VOICE_MODES, TIMBRE_SELECT, SCALE_TYPES, KEYS, RIBBON_SCALES, ARP_TYPES, PARAM,
+    CATEGORIES, VOICE_MODES, TIMBRE_SELECT, SCALE_TYPES, KEYS, RIBBON_SCALES, ARP_TYPES, ARP_RESOLUTIONS, PARAM,
     unpack7, pack7, msg, parseSysex, decodeProgram, decodeGlobal, parseLibraryFile,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
