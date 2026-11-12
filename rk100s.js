@@ -37,7 +37,7 @@
   ];
   const KEYS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   const RIBBON_SCALES = [
-    '"Scale Off"', 'Chromatic', 'Ionian', 'Dorian', 'Phrygian', 'Lydian',
+    'Scale Off', 'Chromatic', 'Ionian', 'Dorian', 'Phrygian', 'Lydian',
     'Mixolydian', 'Aeolian', 'Locrian', 'Harmonic minor', 'Melodic minor',
     'Major Blues', 'minor Blues', 'Diminished', 'Combination Diminished',
     'Major Pentatonic', 'minor Pentatonic', 'Raga Bhairav', 'Raga Gamanasrama',
@@ -48,13 +48,31 @@
   ];
   // Parameter ID:Sub ID pairs from TABLE 1 (only the ones this app sends).
   const PARAM = {
+    VOICE_MODE: [0x00, 0x19],              // 0~3 = Single, Layer, Split, Multi
+    ARP_TIMBRE: [0x00, 0x18],              // 0~2 = Timbre 1, Timbre 2, Timbre 1+2
+    TIMBRE2_MIDI_CH: [0x00, 0x1A],         // 0~15 = ch 1~16, 16 = Global (Multi mode)
+    CENTER_KEY: [0x00, 0x1B],              // 0~127 = C-1~G9 (split key in Split mode)
     ARP_ON: [0x60, 0x01],                  // 0/1
     ARP_TYPE: [0x61, 0x00],                // 0~5, see ARP_TYPES
+    ARP_KEY_SYNC: [0x60, 0x02],            // 0/1
+    ARP_LATCH: [0x61, 0x06],               // 0/1
+    ARP_OCTAVE_RANGE: [0x61, 0x02],        // 0~3 = 1~4 octaves
+    ARP_STEP: (k) => [0x61, 0x10 + k],     // step k+1 on/off, k = 0~7
     SCALE_TYPE: [0x00, 0x17],              // 0~9, see SCALE_TYPES
     SCALE_KEY: [0x00, 0x1E],               // 0~11 = C..B
     LONG_RIBBON_SCALE_TYPE: [0x70, 0x00],  // 0~35, see RIBBON_SCALES
     LONG_RIBBON_SCALE_RANGE: [0x70, 0x01], // -8~+8 octaves (plain signed value, no +64 offset)
     LONG_RIBBON_PITCH_RANGE: [0x70, 0x02], // -8~+8 octaves
+    SHORT_RIBBON_SETTING: [0x70, 0x04],    // 0/1 = Pitch, Modulation
+    SHORT_RIBBON_ASSIGN: [0x70, 0x07],     // 0~127 = CC#000~127 (modulation assign)
+    SHORT_RIBBON_LOCK: [0x70, 0x08],       // 0/1 = Lock Off, On
+    LONG_RIBBON_TIMBRE: [0x70, 0x03],      // 0~2 = Timbre 1, Timbre 2, Timbre 1+2
+    LONG_RIBBON_SCALE_KEY: [0x70, 0x06],   // -12~+12 semitones around C (plain signed value; clamps at +12)
+    // Long Ribbon (Filter) Int. is a timbre parameter (TABLE 6 +91, "+1:16"), plain signed -63~+63.
+    // Timbre parameter ID = timbre * 0x10 + (block + 1): "+0:ss" = 11/21, "+1:ss" = 12/22 (verified on the keytar;
+    // the spec's "1x"/"2x" doesn't say this).
+    T1_LONG_RIBBON_FILTER_INT: [0x12, 0x16],
+    T2_LONG_RIBBON_FILTER_INT: [0x22, 0x16],
   };
   const ARP_TYPES = ['Up', 'Down', 'Alt1', 'Alt2', 'Random', 'Trigger'];
 
@@ -175,6 +193,10 @@
       keySync: (d[336] >> 6) & 1,
       arpType: d[338] & 0x07,
       arpResolution: d[338] >> 4,
+      arpLatch: d[339] >> 7,
+      arpOctRange: (d[339] >> 5) & 0x03,
+      arpLastStep: d[339] & 0x1F,          // 0~7 = step 1~8
+      ...Object.fromEntries(Array.from({ length: 8 }, (_, k) => [`arpStep${k}`, (d[342] >> k) & 1])),
       shortRibbonLock: d[346] >> 7,
       shortRibbonAssign: d[346] & 0x7F,
       ribbonScaleSw: d[347] >> 7,
@@ -186,6 +208,7 @@
       ribbonPitchRange: signed(d[350]) - 64,
       category: d[351] & 0x0F,
       filterInt: ribbonTimbre === 1 ? t2FilterInt : t1FilterInt,
+      t1FilterInt, t2FilterInt,
     };
   }
 

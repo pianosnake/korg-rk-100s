@@ -48,7 +48,7 @@
     list.innerHTML = state.decoded.map((p, i) => {
       const cls = ['row', i === state.current ? 'cur' : '', i === state.viewed ? 'viewed' : ''].join(' ');
       return `<div class="${cls}" data-i="${i}"><span class="num">${pad3(i + 1)}</span>` +
-        `<span class="name">${esc(p.name)}</span><span class="cat">${esc(R.CATEGORIES[p.category])}</span></div>`;
+        `<span class="name">${esc(p.name)}</span><span class="mode">${esc(R.VOICE_MODES[p.voiceMode] || '?')}</span><span class="rscale">${esc(R.RIBBON_SCALES[p.ribbonScaleType] || '?')}</span><span class="cat">${esc(R.CATEGORIES[p.category])}</span></div>`;
     }).join('');
   }
 
@@ -61,6 +61,8 @@
     });
   }
 
+  const noteText = (n) => `${R.KEYS[n % 12]}${Math.floor(n / 12) - 1}`; // 0 = C-1, 60 = C4
+  const ccText = (n) => `CC#${String(n).padStart(2, '0')}`;
   const signedText = (n) => (n >= 0 ? `+${n}` : `${n}`);
   const rangeText = (n) => (n < 0 ? `${-n} Octave (Rev)` : `${n} Octave`);
   // Long Ribbon scale key: -12..+12 semitones around C ("downC ~ C ~ upC").
@@ -80,12 +82,49 @@
       // Off only switches it off (the stored type stays). A type sets the type, then switches it on.
       messages: (v) => (v < 0 ? [[...R.PARAM.ARP_ON, 0]] : [[...R.PARAM.ARP_TYPE, v], [...R.PARAM.ARP_ON, 1]]),
     },
+    // 0~127 = C-1~G9. Only used in Split mode.
+    centerKey: { label: 'Split key', param: R.PARAM.CENTER_KEY, options: Array.from({ length: 128 }, (_, v) => [v, noteText(v)]),
+      enabled: (p) => p.voiceMode === 2 },
+    // 0~15 = ch 1~16, 16+ = Global. Only used in Multi mode.
+    timbre2Ch: { label: 'Timbre 2 MIDI channel', param: R.PARAM.TIMBRE2_MIDI_CH,
+      options: [...Array.from({ length: 16 }, (_, v) => [v, String(v + 1)]), [16, 'Global']], text: (v) => (v >= 16 ? 'Global' : String(v + 1)),
+      enabled: (p) => p.voiceMode === 3 },
+    keySync: { label: 'Arpeggiator key sync', param: R.PARAM.ARP_KEY_SYNC, options: [[0, 'Off'], [1, 'On']] },
+    arpLatch: { label: 'Arpeggiator latch', param: R.PARAM.ARP_LATCH, options: [[0, 'Off'], [1, 'On']] },
+    arpOctRange: { label: 'Arpeggiator octave range', param: R.PARAM.ARP_OCTAVE_RANGE, options: [0, 1, 2, 3].map((v) => [v, String(v + 1)]) },
+    // Step 1~8 on/off (STEP EDIT buttons; not drawn by editor()).
+    ...Object.fromEntries(Array.from({ length: 8 }, (_, k) => [`arpStep${k}`,
+      { label: `Arpeggiator step ${k + 1}`, param: R.PARAM.ARP_STEP(k), options: [[0, 'Off'], [1, 'On']] }])),
+    arpTimbre: { label: 'Arp timbre', param: R.PARAM.ARP_TIMBRE, options: R.TIMBRE_SELECT.map((n, v) => [v, n]) },
+    voiceMode: { label: 'Voice mode', param: R.PARAM.VOICE_MODE, options: R.VOICE_MODES.map((n, v) => [v, n]) },
     scaleType: { label: 'Scale', param: R.PARAM.SCALE_TYPE, options: R.SCALE_TYPES.map((n, v) => [v, n]) },
     scaleKey: { label: 'Scale key', param: R.PARAM.SCALE_KEY, options: R.KEYS.map((n, v) => [v, n]) },
     ribbonScaleType: { label: 'Long Ribbon scale type', param: R.PARAM.LONG_RIBBON_SCALE_TYPE, options: R.RIBBON_SCALES.map((n, v) => [v, n]) },
     ribbonScaleRange: { label: 'Long Ribbon scale range', param: R.PARAM.LONG_RIBBON_SCALE_RANGE, options: octaves },
     ribbonPitchRange: { label: 'Long Ribbon (pitch) range', param: R.PARAM.LONG_RIBBON_PITCH_RANGE, options: octaves },
+    shortRibbonAssign: { label: 'Short Ribbon modulation assign', param: R.PARAM.SHORT_RIBBON_ASSIGN, options: Array.from({ length: 128 }, (_, v) => [v, ccText(v)]) },
+    // A timbre parameter: sent to the timbre the Long Ribbon controls (both for Timbre 1+2). The edit is kept per
+    // timbre (t1FilterInt / t2FilterInt), so changing TIMBRE SELECT afterwards shows the right timbre's value.
+    filterInt: {
+      label: 'Long Ribbon filter intensity',
+      options: Array.from({ length: 127 }, (_, k) => k - 63).map((n) => [n, signedText(n)]),
+      keys: (p) => [...(p.ribbonTimbre !== 1 ? ['t1FilterInt'] : []), ...(p.ribbonTimbre !== 0 ? ['t2FilterInt'] : [])],
+      messages: (v, p) => EDITABLE.filterInt.keys(p).map((k) => [...(k === 't1FilterInt' ? R.PARAM.T1_LONG_RIBBON_FILTER_INT : R.PARAM.T2_LONG_RIBBON_FILTER_INT), v]),
+    },
+    ribbonTimbre: { label: 'Long Ribbon timbre select', param: R.PARAM.LONG_RIBBON_TIMBRE, options: R.TIMBRE_SELECT.map((n, v) => [v, n]) },
+    // The keytar allows -12..+12 (down C .. up C); the dropdown offers the 12 notes C..B.
+    ribbonScaleKey: { label: 'Long Ribbon scale key', param: R.PARAM.LONG_RIBBON_SCALE_KEY, options: R.KEYS.map((n, v) => [v, n]), text: ribbonKeyText },
+    shortRibbonLock: { label: 'Short Ribbon modulation lock', param: R.PARAM.SHORT_RIBBON_LOCK, options: [[0, 'Lock Off'], [1, 'Lock On']] },
+    shortRibbonSetting: { label: 'Short Ribbon setting', param: R.PARAM.SHORT_RIBBON_SETTING, options: [[0, 'Pitch'], [1, 'Modulation']] },
   };
+
+  // Stored program with the unsaved edits applied. filterInt follows the (possibly edited) ribbon timbre.
+  function withEdits(stored, edits) {
+    const p = { ...stored, arp: arpValue(stored), ...edits };
+    p.filterInt = p.ribbonTimbre === 1 ? p.t2FilterInt : p.t1FilterInt;
+    return p;
+  }
+  const editLabel = (k) => (k === 't1FilterInt' || k === 't2FilterInt' ? EDITABLE.filterInt.label : EDITABLE[k].label);
 
   function renderDetails() {
     const el = $('details');
@@ -93,13 +132,37 @@
     const stored = i != null ? state.decoded[i] : null;
     if (!stored) { el.innerHTML = '<div class="empty">Click a program to see its details.</div>'; return; }
     const edits = state.edit && state.edit.prog === i && i === state.current ? state.edit.values : {};
-    const p = { ...stored, arp: arpValue(stored), ...edits };
+    const p = withEdits(stored, edits);
 
     // One labelled box, like the old editor: caption above, black LCD value below.
     const field = (caption, value) => `<div class="field"><div class="cap">${esc(caption)}</div><div class="val">${esc(value)}</div></div>`;
     const editor = (caption, key) => {
-      const opts = EDITABLE[key].options.map(([v, name]) => `<option value="${v}"${v === p[key] ? ' selected' : ''}>${esc(name)}</option>`).join('');
-      return `<div class="field${key in edits ? ' modified' : ''}"><div class="cap">${esc(caption)}</div><select class="val" data-field="${key}">${opts}</select></div>`;
+      const f = EDITABLE[key];
+      // Keep a stored value the dropdown doesn't offer (e.g. a Long Ribbon key below/above C..B) selectable.
+      const options = f.options.some(([v]) => v === p[key]) ? f.options : [...f.options, [p[key], f.text ? f.text(p[key]) : String(p[key])]];
+      const opts = options.map(([v, name]) => `<option value="${v}"${v === p[key] ? ' selected' : ''}>${esc(name)}</option>`).join('');
+      const modified = f.keys ? f.keys(p).some((k) => k in edits) : key in edits;
+      // Fields that only matter in some modes (split key, timbre 2 channel) are greyed out otherwise.
+      const off = f.enabled && !f.enabled(p);
+      return `<div class="field${modified ? ' modified' : ''}${off ? ' off' : ''}"><div class="cap">${esc(caption)}</div><select class="val" data-field="${key}"${off ? ' disabled' : ''}>${opts}</select></div>`;
+    };
+    // On/off field as a checkbox (custom-drawn: WebKit ignores borders on native checkboxes).
+    const checkbox = (caption, key) =>
+      `<div class="field${key in edits ? ' modified' : ''}"><div class="cap">${esc(caption)}</div>` +
+      `<label class="check"><input type="checkbox" data-field="${key}"${p[key] ? ' checked' : ''}><span>On</span></label></div>`;
+    // STEP EDIT: 8 step on/off buttons (lit red when on) and ◀ ▶ to rotate the pattern. Steps after the
+    // program's last step are dimmed: the keytar doesn't play them.
+    const stepEdit = () => {
+      const steps = Array.from({ length: 8 }, (_, k) => {
+        const key = `arpStep${k}`;
+        const cls = `step${p[key] ? ' on' : ''}${key in edits ? ' modified' : ''}${k > p.arpLastStep ? ' past' : ''}`;
+        return `<button class="${cls}" data-step="${k}" title="Step ${k + 1}: ${p[key] ? 'on' : 'off'}${k > p.arpLastStep ? ' (after the last step)' : ''}">` +
+          `<span class="n">${k + 1}</span><span class="led"></span></button>`;
+      }).join('');
+      return `<div class="step-edit"><div class="sub-title">STEP EDIT</div><div class="step-row">` +
+        `<button class="shift" data-shift="-1" title="Rotate the pattern one step left">◀</button>` +
+        `<button class="shift" data-shift="1" title="Rotate the pattern one step right">▶</button>` +
+        `<div class="steps">${steps}</div></div></div>`;
     };
     const section = (title, body, extra = '') =>
       `<section class="sect${extra}"><div class="sect-title">${title}</div><div class="sect-body">${body}</div></section>`;
@@ -111,32 +174,36 @@
       `<div class="det-head"><div class="det-num">${pad3(i + 1)}</div>` +
       `<div class="det-name">${esc(p.name.trimEnd())}</div>` +
       `<button id="btn-save" class="save"${canSave ? '' : ' disabled'} title="${anyEdits ? `Save the changes into program ${pad3(i + 1)} on the keytar` : 'No changes to save'}">SAVE</button></div>` +
-      `<div class="sect-row">` +
+      `<div class="sect-grid">` +
       section('PROGRAM', [
-        field('VOICE MODE', R.VOICE_MODES[p.voiceMode]),
-        field('OCTAVE', signedText(p.octave)),
-        editor('ARPEGGIATOR', 'arp'),
-        field('ARP TIMBRE', `${R.TIMBRE_SELECT[p.arpTimbre] || '?'}${p.keySync ? ' · Key Sync' : ''}`),
-      ].join(''), ' grid2') +
+        editor('VOICE MODE', 'voiceMode'),
+        editor('SPLIT KEY', 'centerKey'),
+        editor('TIMBRE 2 MIDI CH', 'timbre2Ch'),
+      ].join(''), ' grid2 span2') +
       section('SCALE', [
         editor('SCALE', 'scaleType'),
         editor('SCALE KEY', 'scaleKey'),
       ].join(''), ' grid1') +
-      `</div>` +
-      `<div class="sect-row">` +
+      section('ARPEGGIATOR', [
+        editor('TYPE', 'arp'),
+        editor('TIMBRE', 'arpTimbre'),
+        editor('OCTAVE RANGE', 'arpOctRange'),
+        `<div class="pair">${checkbox('LATCH', 'arpLatch')}${checkbox('KEY SYNC', 'keySync')}</div>`,
+        stepEdit(),
+      ].join(''), ' grid2 span2') +
       section('LONG RIBBON',
         `<div class="cols">` +
-          `<div>${field('TIMBRE SELECT', R.TIMBRE_SELECT[p.ribbonTimbre] || '?')}` +
+          `<div>${editor('TIMBRE SELECT', 'ribbonTimbre')}` +
           `${editor('SCALE TYPE', 'ribbonScaleType')}` +
-          `${field('SCALE KEY', ribbonKeyText(p.ribbonScaleKey))}</div>` +
+          `${editor('SCALE KEY', 'ribbonScaleKey')}</div>` +
           `<div>${editor('SCALE RANGE', 'ribbonScaleRange')}` +
           `${editor('PITCH RANGE', 'ribbonPitchRange')}` +
-          `${field('FILTER INTENSITY', signedText(p.filterInt))}</div>` +
-        `</div>`, ' ribbon') +
+          `${editor('FILTER INTENSITY', 'filterInt')}</div>` +
+        `</div>`, ' ribbon span2') +
       section('SHORT RIBBON', [
-        field('SETTING', p.shortRibbonSetting ? 'Modulation' : 'Pitch'),
-        field('MODULATION ASSIGN', `CC#${String(p.shortRibbonAssign).padStart(2, '0')}`),
-        field('MODULATION LOCK', p.shortRibbonLock ? 'Lock On' : 'Lock Off'),
+        editor('SETTING', 'shortRibbonSetting'),
+        editor('MODULATION ASSIGN', 'shortRibbonAssign'),
+        checkbox('MODULATION LOCK', 'shortRibbonLock'),
       ].join(''), ' short') +
       `</div>`;
   }
@@ -155,12 +222,12 @@
   }
 
   // Select the program on the keytar: Bank MSB 0, Bank LSB 0/1, Program Change on the global channel.
-  function selectOnKeytar(i) {
-    if (!midi.connected) { view(i); setStatus('Not connected: only showing the details.'); return; }
+  // scroll: bring the row into view (favorites can point anywhere in the list).
+  function selectOnKeytar(i, { scroll = false } = {}) {
+    if (!midi.connected) { view(i); if (scroll) scrollToRow(i); setStatus('Not connected: only showing the details.'); return; }
     R.msg.programChange(midi.channel, i).forEach(send);
-    setCurrent(i, { scroll: false });
-    setStatus(state.progChgOn ? `Sent program ${pad3(i + 1)} to the keytar.`
-      : 'Program Change is disabled in the keytar\'s global settings, so it will ignore this.');
+    setCurrent(i, { scroll });
+    if (!state.progChgOn) setStatus('Program Change is disabled in the keytar\'s global settings, so it will ignore this.');
   }
 
   // Remember (or forget, when back to the stored value) an edit-buffer change.
@@ -177,12 +244,11 @@
     const f = EDITABLE[key];
     if (!midi.connected) { setStatus('Not connected: cannot change it.'); renderDetails(); return; }
     if (i !== state.current) selectOnKeytar(i); // the edit buffer must hold this program first
-    const msgs = f.messages ? f.messages(v) : [[...f.param, v]];
+    const p = withEdits(state.decoded[i], state.edit && state.edit.prog === i ? state.edit.values : {});
+    const msgs = f.messages ? f.messages(v, p) : [[...f.param, v]];
     msgs.forEach(([id, sub, val]) => send(R.msg.parameterChange(midi.channel, id, sub, val)));
-    noteEdit(i, key, v);
+    (f.keys ? f.keys(p) : [key]).forEach((k) => noteEdit(i, k, v));
     renderDetails();
-    const name = f.options.find(([x]) => x === v)[1];
-    setStatus(`${f.label} set to ${name}. Write the program on the keytar to keep it.`);
   }
 
   const sameBytes = (a, b) => a.length === b.length && a.every((x, k) => x === b[k]);
@@ -213,7 +279,7 @@
       const missing = Object.keys(edits).filter((k) => (k === 'arp' ? arpValue(d) : d[k]) !== edits[k]);
       if (missing.length) {
         await checkWrongSlot(i);
-        throw new Error(`program ${pad3(i + 1)} on the keytar doesn't have the change (${missing.map((k) => EDITABLE[k].label).join(', ')})`);
+        throw new Error(`program ${pad3(i + 1)} on the keytar doesn't have the change (${missing.map(editLabel).join(', ')})`);
       }
       state.programs[i] = back.data;
       state.decoded[i] = d;
@@ -294,6 +360,10 @@
           noteEdit(cur, 'arp', m.value ? (arpNow >= 0 ? arpNow : state.decoded[cur].arpType) : -1);
         } else if (is(R.PARAM.ARP_TYPE)) {
           if (arpNow >= 0) noteEdit(cur, 'arp', m.value);
+        } else if (is(R.PARAM.T1_LONG_RIBBON_FILTER_INT)) {
+          noteEdit(cur, 't1FilterInt', m.value);
+        } else if (is(R.PARAM.T2_LONG_RIBBON_FILTER_INT)) {
+          noteEdit(cur, 't2FilterInt', m.value);
         } else {
           const key = Object.keys(EDITABLE).find((k) => EDITABLE[k].param && is(EDITABLE[k].param));
           if (!key) return;
@@ -433,7 +503,7 @@
       await findCurrentProgram();
       renderAll();
       if (state.current != null) scrollToRow(state.current);
-      setStatus('Connected. Showing the cached programs; press Reload to receive them again.');
+      setStatus('Connected. Press Reload to refresh');
     } else {
       setStatus('Connected. Press Load programs to receive the 200 programs.');
     }
@@ -485,13 +555,28 @@
     const el = e.target.closest('[data-i]');
     return el && el.dataset.i !== '' ? +el.dataset.i : null;
   };
-  // List click selects the program on the keytar; the favorites grid and arrow keys only show details.
+  // List and favorites clicks select the program on the keytar; arrow keys only show details.
   $('list').onclick = (e) => { const i = clicked(e); if (i != null) selectOnKeytar(i); };
-  $('fav-table').onclick = (e) => { const i = clicked(e); if (i != null) view(i); };
-  $('details').onclick = (e) => { if (e.target.id === 'btn-save') saveProgram(); };
+  $('fav-table').onclick = (e) => { const i = clicked(e); if (i != null) selectOnKeytar(i, { scroll: true }); };
+  $('details').onclick = (e) => {
+    if (e.target.id === 'btn-save') { saveProgram(); return; }
+    const i = state.viewed;
+    if (i == null || !state.decoded[i]) return;
+    const p = withEdits(state.decoded[i], state.edit && state.edit.prog === i ? state.edit.values : {});
+    const step = e.target.closest('[data-step]');
+    if (step) { const key = `arpStep${step.dataset.step}`; setField(i, key, p[key] ? 0 : 1); return; }
+    const shift = e.target.closest('[data-shift]');
+    if (shift) {
+      // Rotate the steps up to the last step; only the steps that change are sent.
+      const n = p.arpLastStep + 1, d = +shift.dataset.shift;
+      const cur = Array.from({ length: n }, (_, k) => p[`arpStep${k}`]);
+      const next = cur.map((_, k) => cur[(k - d + n) % n]);
+      next.forEach((v, k) => { if (v !== cur[k]) setField(i, `arpStep${k}`, v); });
+    }
+  };
   $('details').onchange = (e) => {
     const key = e.target.dataset.field;
-    if (key) setField(state.viewed, key, +e.target.value);
+    if (key) setField(state.viewed, key, e.target.type === 'checkbox' ? +e.target.checked : +e.target.value);
   };
   $('list').onkeydown = (e) => {
     const step = { ArrowDown: 1, ArrowUp: -1, PageDown: 20, PageUp: -20 }[e.key];
