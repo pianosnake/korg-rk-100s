@@ -24,12 +24,15 @@ button, select { font-family: inherit; font-size: 12px; }
 .brand .korg { font: 900 26px/1 "Arial Black", Impact, sans-serif; letter-spacing: -1px; color: #e5d2d2; }
 .brand .model { font: 700 17px/1 Arial, sans-serif; color: #e5d2d2; }
 
-#btn-reload {
-  margin-left: auto; align-self: center;
+/* Reload with GLOBAL under it, at the right of the logo. */
+.side-buttons { margin-left: auto; align-self: flex-start; display: flex; flex-direction: column; gap: 4px; }
+#btn-reload, #btn-global {
+  -webkit-appearance: none; appearance: none; -webkit-text-fill-color: #fff;
   padding: 2px 8px; border: 1px solid #222; border-radius: 3px; cursor: pointer; color: #fff;
   background: linear-gradient(#8a8a8a, #4b4b4b);
 }
 #btn-reload:disabled { opacity: .45; cursor: default; }
+#btn-global.active { background: linear-gradient(#f2f2f2, #c4c4c4); color: #000; -webkit-text-fill-color: #000; box-shadow: inset 0 1px 2px rgba(0,0,0,.35); }
 .status-line { font-size: 11px; min-height: 18px; display: flex; gap: 6px; align-items: center; color: #f4dede; }
 .status { padding: 1px 7px; border-radius: 9px; white-space: nowrap; }
 .status.off { background: #5b5b5b; color: #ddd; }
@@ -176,6 +179,36 @@ button, select { font-family: inherit; font-size: 12px; }
 }
 .save:hover:not(:disabled) { background: linear-gradient(#ffe27a, #f0bf10); }
 .save:disabled { background: #4a4a4a; border-color: #555; color: #888; -webkit-text-fill-color: #888; opacity: 1; cursor: default; }
+
+/* GLOBAL page: same grid as the program page. GLOBAL takes 1 column, USER SCALE 2 (wide layout). */
+/* Text field with a unit (MASTER TUNE ... Hz). appearance: none so WebKit keeps our border. */
+.field .with-unit { display: flex; align-items: center; gap: 6px; }
+.field input.val { -webkit-appearance: none; appearance: none; width: 80px; flex: none; outline: none; -webkit-text-fill-color: #f4f4f4; }
+.field input.val:hover, .field input.val:focus { border-color: #aaa; }
+.field .unit { font: 12px var(--lcd-font); color: #d8d8d8; }
+.field .val.invalid, .field.modified .val.invalid { border-color: #e03030; box-shadow: 0 0 0 1px #e03030; }
+/* One octave drawn like the old editor: outlined white keys, black keys over the gaps, a cents box in each.
+   Sized in % of the keyboard (no container units: the iPad's WebKit ignores cqw), up to 46px per white key. */
+.kbd { position: relative; display: flex; width: 100%; max-width: 323px; height: 116px; margin-top: 3px; background: #000; }
+.kbd .wkey {
+  flex: 1 1 0; min-width: 0; border: 1px solid #bbb; margin-right: -1px;
+  display: flex; align-items: flex-end; justify-content: center; padding-bottom: 5px;
+}
+.kbd .bkey {
+  position: absolute; top: 0; --bw: max(30px, 100% / 7 * .74); left: calc(100% / 7 * var(--gap) - var(--bw) / 2); width: var(--bw); height: 64px;
+  background: #000; border: 1px solid #bbb; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px;
+}
+.kbd .cents {
+  position: relative; display: flex; align-items: center; justify-content: center; width: calc(100% - 8px); max-width: 34px; height: 20px;
+  background: #000; border: 1px solid #555; font: 11px var(--lcd-font); color: #f4f4f4;
+}
+.kbd .bkey .cents { width: calc(100% - 6px); max-width: none; }
+.kbd .cents select {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer;
+  -webkit-appearance: none; appearance: none; font-size: 16px;
+}
+.kbd .cents:hover { border-color: #aaa; }
+.kbd .cents.modified { border-color: #f5c400; box-shadow: 0 0 0 1px #f5c400; }
 
 /* ---------- responsive ----------
    Driven by the width of the details pane (not the window), since the red column eats 380px

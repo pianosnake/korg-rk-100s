@@ -127,6 +127,8 @@
     currentProgramDumpRequest: (ch) => [...header(ch), FUNC.CURRENT_PROGRAM_DUMP_REQUEST, 0xF7],
     programDumpRequest: (ch, prog) =>
       [...header(ch), FUNC.PROGRAM_DUMP_REQUEST, prog & 0x7F, (prog >> 7) & 0x7F, 0xF7],
+    // GLOBAL DATA DUMP (func 51) to the keytar: saves into Internal Memory, replies 23 (ACK) / 24 (NAK). 195 bytes.
+    globalDump: (ch, data) => [...header(ch), FUNC.GLOBAL_DUMP, ...pack7(Array.from(data)), 0xF7],
     currentProgramDump: (ch, data) =>
       [...header(ch), FUNC.CURRENT_PROGRAM_DUMP, ...pack7(Array.from(data)), 0xF7],
     // PROGRAM WRITE REQUEST (func 11): store the edit buffer into slot prog. 10 bytes, replies 21 (OK) / 22 (error).
@@ -232,14 +234,32 @@
     };
   }
 
+  // Global data (TABLE 7). Transpose and the user scale are plain signed bytes: the keytar's own dump has 0 at byte 1
+  // with Transpose 0, despite the spec's "12+/-12".
   function decodeGlobal(d) {
     return {
-      masterTune: signed(d[0]),
-      transpose: d[1] - 12,
-      midiChannel: d[4] & 0x0F,
+      masterTune: signed(d[0]),            // -100~+100 = 430.0~450.0 Hz (0.1 Hz steps)
+      transpose: signed(d[1]),             // -12~+12 semitones
+      velCurve: d[3] & 0x0F,               // 0~7 = Curve 1~8, 8 = Constant (127)
+      midiChannel: d[4] & 0x0F,            // 0~15 = ch 1~16. Read only: the keytar ignores it in a received dump (verified)
       progChgFilter: d[9] & 1,
+      ...Object.fromEntries(Array.from({ length: 12 }, (_, k) => [`userScale${k}`, signed(d[16 + k])])), // C..B, -63~+63 cents
+      ribbonMidiCh: d[28],                 // 0~15 = ch 1~16, 16 = Global
       favorites: Array.from(d.slice(100, 140)), // 5 banks x 8 (A..H), 0-based program numbers
     };
+  }
+
+  // Global data with some decodeGlobal() fields changed (only the editable ones). Returns a new array.
+  function encodeGlobal(d, values) {
+    const out = Uint8Array.from(d);
+    for (const [key, v] of Object.entries(values)) {
+      if (key === 'masterTune') out[0] = v & 0xFF;
+      else if (key === 'transpose') out[1] = v & 0xFF;
+      else if (key === 'velCurve') out[3] = (out[3] & 0xF0) | (v & 0x0F);
+      else if (key === 'ribbonMidiCh') out[28] = v;
+      else if (/^userScale\d+$/.test(key)) out[16 + +key.slice(9)] = v & 0xFF;
+    }
+    return out;
   }
 
   // ---- Sound Editor library files (.rk100s_all / .rk100s_prog etc.) -------
@@ -279,6 +299,6 @@
   global.RK100S = {
     PROGRAM_SIZE, GLOBAL_SIZE, NUM_PROGRAMS, FUNC,
     CATEGORIES, VOICE_MODES, TIMBRE_SELECT, SCALE_TYPES, KEYS, RIBBON_SCALES, ARP_TYPES, ARP_RESOLUTIONS, OSC1_WAVES, PCM_WAVES, PARAM,
-    unpack7, pack7, msg, parseSysex, decodeProgram, decodeGlobal, parseLibraryFile,
+    unpack7, pack7, msg, parseSysex, decodeProgram, decodeGlobal, encodeGlobal, parseLibraryFile,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

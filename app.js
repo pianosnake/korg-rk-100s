@@ -11,6 +11,9 @@
     programs: [],        // raw 352-byte arrays
     decoded: [],         // decodeProgram() results
     favorites: null,     // 40 program numbers (5 banks x A..H)
+    global: null,        // raw 164-byte global data (TABLE 7)
+    globalEdit: {},
+    page: 'program',     // right pane: 'program' (details of state.viewed) or 'global' (GLOBAL button)      // unsaved global changes {field: value}; sent with SAVE GLOBAL (globals have no Parameter Change)
     edit: null,          // unsaved changes in the keytar's edit buffer: {prog, values: {field: value}}
     progChgOn: true,     // Global "ProgChg Filter": keytar ignores Program Change when disabled
     current: null,       // program selected on the keytar
@@ -129,10 +132,30 @@
     p.filterInt = p.ribbonTimbre === 1 ? p.t2FilterInt : p.t1FilterInt;
     return p;
   }
+  // Global settings. They have no Parameter Change, so edits wait here until SAVE GLOBAL writes the whole global dump.
+  const transposeText = (n) => (n > 0 ? `+${n}` : String(n));
+  const chText = (v) => (v >= 16 ? 'Global' : String(v + 1));
+  const GLOBAL_FIELDS = {
+    transpose: { label: 'Transpose', options: Array.from({ length: 25 }, (_, k) => k - 12).map((n) => [n, transposeText(n)]) },
+    // Text field in Hz: only 430.0~450.0 (one decimal) is accepted; stored as (Hz - 440) x 10.
+    masterTune: { label: 'Master tune', input: true, text: (v) => (440 + v / 10).toFixed(1),
+      parse: (t) => {
+        if (!/^\s*\d{3}(\.\d?)?\s*$/.test(t)) return null;
+        const hz = parseFloat(t);
+        return hz >= 430 && hz <= 450 ? Math.round((hz - 440) * 10) : null;
+      } },
+    velCurve: { label: 'Velocity curve', options: [...Array.from({ length: 8 }, (_, v) => [v, `Curve ${v + 1}`]), [8, 'Constant']] },
+    ribbonMidiCh: { label: 'Long Ribbon MIDI channel', options: [...Array.from({ length: 16 }, (_, v) => [v, String(v + 1)]), [16, 'Global']], text: chText },
+    ...Object.fromEntries(R.KEYS.map((n, k) => [`userScale${k}`,
+      { label: `User scale ${n}`, options: Array.from({ length: 127 }, (_, j) => j - 63).map((c) => [c, String(c)]) }])),
+  };
+
   const editLabel = (k) => (k === 't1FilterInt' || k === 't2FilterInt' ? EDITABLE.filterInt.label : EDITABLE[k].label);
 
   function renderDetails() {
     const el = $('details');
+    $('btn-global').classList.toggle('active', state.page === 'global');
+    if (state.page === 'global') { el.innerHTML = globalPage(); return; }
     const i = state.viewed;
     const stored = i != null ? state.decoded[i] : null;
     if (!stored) { el.innerHTML = '<div class="empty">Click a program to see its details.</div>'; return; }
@@ -219,6 +242,95 @@
       `</div>`;
   }
 
+  // GLOBAL page (GLOBAL button): channel/transpose dropdowns and the USER SCALE keyboard (cents per note), with its own SAVE.
+  function globalPage() {
+    const anyEdits = Object.keys(state.globalEdit).length > 0;
+    const head = `<div class="det-head"><div class="det-name">GLOBAL</div>` +
+      `<button id="btn-save-global" class="save"${anyEdits && !state.busy ? '' : ' disabled'} ` +
+      `title="${anyEdits ? 'Write the global settings to the keytar' : 'No changes to save'}">SAVE</button></div>`;
+    if (!state.global) return `${head}<div class="empty">Not read yet: connect the keytar (with SysEx both ways).</div>`;
+    const g = { ...R.decodeGlobal(state.global), ...state.globalEdit };
+    const options = (key, cls = '') => {
+      const f = GLOBAL_FIELDS[key];
+      const list = f.options.some(([v]) => v === g[key]) ? f.options : [...f.options, [g[key], f.text ? f.text(g[key]) : String(g[key])]];
+      return `<select class="${cls}" data-gfield="${key}" title="${esc(f.label)}">` +
+        list.map(([v, name]) => `<option value="${v}"${v === g[key] ? ' selected' : ''}>${esc(name)}</option>`).join('') + '</select>';
+    };
+    const gInput = (caption, key, unit) =>
+      `<div class="field${key in state.globalEdit ? ' modified' : ''}"><div class="cap">${esc(caption)}</div>` +
+      `<div class="with-unit"><input class="val" type="text" inputmode="decimal" maxlength="5" data-gfield="${key}" ` +
+      `value="${GLOBAL_FIELDS[key].text(g[key])}" title="430.0 to 450.0 Hz"><span class="unit">${unit}</span></div></div>`;
+    const gEditor = (caption, key) =>
+      `<div class="field${key in state.globalEdit ? ' modified' : ''}"><div class="cap">${esc(caption)}</div>${options(key, 'val')}</div>`;
+    // One octave, C..B: white keys hold their value at the bottom, black keys (drawn over the gaps) at their own bottom.
+    // Each box: the value drawn centred, with an invisible dropdown over it (iOS ignores text-align in a <select>).
+    const box = (k) => { const key = `userScale${k}`;
+      return `<span class="cents${key in state.globalEdit ? ' modified' : ''}"><span class="num">${g[key]}</span>${options(key)}</span>`; };
+    const whites = [0, 2, 4, 5, 7, 9, 11].map((k) => `<div class="wkey">${box(k)}</div>`).join('');
+    const blacks = [[1, 1], [3, 2], [6, 4], [8, 5], [10, 6]]
+      .map(([k, gap]) => `<div class="bkey" style="--gap: ${gap}">${box(k)}</div>`).join('');
+    const section = (title, body, extra = '') =>
+      `<section class="sect${extra}"><div class="sect-title">${title}</div><div class="sect-body">${body}</div></section>`;
+    return head + `<div class="sect-grid">` +
+      section('GLOBAL', gEditor('TRANSPOSE', 'transpose') + gEditor('VELOCITY CURVE', 'velCurve') +
+        gEditor('LONG RIBBON MIDI CH', 'ribbonMidiCh') + gInput('MASTER TUNE', 'masterTune', 'Hz'), ' grid1') +
+      section('USER SCALE', `<div class="kbd">${whites}${blacks}</div>`, ' uscale span2') +
+      `</div>`;
+  }
+
+  function setGlobalField(key, v) {
+    const stored = R.decodeGlobal(state.global)[key];
+    if (v === stored) delete state.globalEdit[key]; else state.globalEdit[key] = v;
+    renderDetails();
+  }
+
+  // Forget global edits that the stored data now has anyway (after a save or a fresh global dump).
+  function pruneGlobalEdits() {
+    const g = R.decodeGlobal(state.global);
+    for (const k of Object.keys(state.globalEdit)) if (state.globalEdit[k] === g[k]) delete state.globalEdit[k];
+  }
+
+  // SAVE GLOBAL: read the keytar's global data fresh (so favorites etc. changed on the keytar are kept), patch the
+  // edited fields in, send it as GLOBAL DATA DUMP (51, 195 bytes), wait for the ACK, then read it back and check.
+  async function saveGlobal() {
+    if (state.busy || !Object.keys(state.globalEdit).length) return;
+    if (!midi.identified) await handshake();
+    if (!midi.identified) {
+      setStatus('Cannot save: no SysEx is coming back from the keytar. Route the keytar\'s MIDI (with SysEx) into this plugin.');
+      return;
+    }
+    const edits = { ...state.globalEdit };
+    state.busy = true; renderButtons(); renderDetails();
+    const step = async (what, promise) => { try { return await promise; } catch (e) { throw new Error(`no reply ${what}`); } };
+    const readGlobal = () => request(R.msg.globalDumpRequest(midi.channel), (x) => x.type === 'global');
+    try {
+      setStatus('Saving global settings…');
+      const fresh = await step('when reading the global settings', readGlobal());
+      const data = R.encodeGlobal(fresh.data, edits);
+      const reply = await step('to the global dump (long SysEx may not get through this host)',
+        request(R.msg.globalDump(midi.channel, data), (x) => ['ack', 'nak', 'format-error'].includes(x.type), { timeout: 3000, retries: 0 }));
+      if (reply.type !== 'ack') throw new Error(`the keytar refused the global data (${reply.type})`);
+      const back = await step('when reading the global settings back', readGlobal());
+      setGlobal(back.data); // drops the edits the keytar now has; any left over didn't land
+      const missing = Object.keys(state.globalEdit);
+      if (missing.length) throw new Error(`the keytar doesn't have the change (${missing.map((k) => GLOBAL_FIELDS[k].label).join(', ')})`);
+      setStatus('Saved the global settings.');
+    } catch (e) {
+      setStatus(`Save failed: ${e.message}`);
+    } finally {
+      state.busy = false; renderButtons(); renderDetails();
+    }
+  }
+
+  // New global data from the keytar: favorites, Program Change filter, global settings.
+  function setGlobal(data) {
+    state.global = data;
+    ({ favorites: state.favorites, progChgFilter: state.progChgOn } = R.decodeGlobal(data));
+    state.progChgOn = !!state.progChgOn;
+    pruneGlobalEdits();
+    persist();
+  }
+
   function renderAll() { renderFavorites(); renderList(); renderDetails(); }
 
   function scrollToRow(i) {
@@ -228,6 +340,7 @@
 
   // ------------------------------------------------------------ selection
   function view(i) {
+    state.page = 'program';
     state.viewed = i;
     markRows(); renderFavorites(); renderDetails();
   }
@@ -333,6 +446,7 @@
     try {
       localStorage.setItem('rk100s-simple-lib', JSON.stringify({
         programs: state.programs.map(toB64), favorites: state.favorites,
+        global: state.global ? toB64(state.global) : null,
       }));
     } catch (e) { console.warn('Could not cache programs', e); }
   }
@@ -344,6 +458,7 @@
       state.programs = s.programs.map(fromB64);
       state.decoded = state.programs.map(R.decodeProgram);
       state.favorites = s.favorites || null;
+      state.global = s.global ? fromB64(s.global) : null;
     } catch (e) { console.warn(e); }
   }
 
@@ -385,10 +500,9 @@
       }
       // Unsolicited dumps (e.g. from the keytar's MIDI dump page, or after editing favorites).
       if (m.type === 'global') {
-        ({ favorites: state.favorites, progChgFilter: state.progChgOn } = R.decodeGlobal(m.data));
-        state.progChgOn = !!state.progChgOn;
-        persist(); renderFavorites(); renderDetails();
-        setStatus('Favorites updated from the keytar.');
+        setGlobal(m.data);
+        renderFavorites(); renderDetails();
+        setStatus('Global settings updated from the keytar.');
       } else if (m.type === 'program' && m.number < R.NUM_PROGRAMS && state.programs.length) {
         state.programs[m.number] = m.data;
         state.decoded[m.number] = R.decodeProgram(m.data);
@@ -510,6 +624,9 @@
         return;
       }
     }
+    // Global settings (and favorites) are small: read them on every connect, even before the programs are loaded.
+    try { setGlobal((await request(R.msg.globalDumpRequest(midi.channel), (x) => x.type === 'global', { retries: 0 })).data); } catch (e) { /* not critical */ }
+    renderFavorites(); renderDetails();
     if (state.programs.length) {
       await findCurrentProgram();
       renderAll();
@@ -535,9 +652,7 @@
       }
       state.programs = programs;
       state.decoded = programs.map(R.decodeProgram);
-      ({ favorites: state.favorites, progChgFilter: state.progChgOn } = R.decodeGlobal(g.data));
-      state.progChgOn = !!state.progChgOn;
-      persist();
+      setGlobal(g.data);
       await findCurrentProgram();
       renderAll();
       if (state.current != null) scrollToRow(state.current);
@@ -567,10 +682,13 @@
     return el && el.dataset.i !== '' ? +el.dataset.i : null;
   };
   // List and favorites clicks select the program on the keytar; arrow keys only show details.
-  $('list').onclick = (e) => { const i = clicked(e); if (i != null) selectOnKeytar(i); };
-  $('fav-table').onclick = (e) => { const i = clicked(e); if (i != null) selectOnKeytar(i, { scroll: true }); };
+  // Clicking a program (list or favorite) leaves the GLOBAL page; program changes from the keytar don't.
+  $('list').onclick = (e) => { const i = clicked(e); if (i != null) { state.page = 'program'; selectOnKeytar(i); } };
+  $('fav-table').onclick = (e) => { const i = clicked(e); if (i != null) { state.page = 'program'; selectOnKeytar(i, { scroll: true }); } };
+  $('btn-global').onclick = () => { state.page = state.page === 'global' ? 'program' : 'global'; renderDetails(); };
   $('details').onclick = (e) => {
     if (e.target.id === 'btn-save') { saveProgram(); return; }
+    if (e.target.id === 'btn-save-global') { saveGlobal(); return; }
     const i = state.viewed;
     if (i == null || !state.decoded[i]) return;
     const p = withEdits(state.decoded[i], state.edit && state.edit.prog === i ? state.edit.values : {});
@@ -586,9 +704,25 @@
     }
   };
   $('details').onchange = (e) => {
+    const gkey = e.target.dataset.gfield;
+    if (gkey && GLOBAL_FIELDS[gkey].input) {
+      // Text field: only a valid value becomes an edit; leaving it with an invalid one puts the last valid value back.
+      const v = GLOBAL_FIELDS[gkey].parse(e.target.value);
+      if (v != null) setGlobalField(gkey, v); else renderDetails();
+      return;
+    }
+    if (gkey) { setGlobalField(gkey, +e.target.value); return; }
     const key = e.target.dataset.field;
     if (key) setField(state.viewed, key, e.target.type === 'checkbox' ? +e.target.checked : +e.target.value);
   };
+  // Live check while typing in a text field (red border = not accepted; reverted when leaving the field).
+  $('details').oninput = (e) => {
+    const f = GLOBAL_FIELDS[e.target.dataset.gfield];
+    if (f && f.input) e.target.classList.toggle('invalid', f.parse(e.target.value) == null);
+  };
+  // Tapping into a text field selects its value, so typing replaces it (the field is full at 5 characters).
+  $('details').addEventListener('focusin', (e) => { if (e.target.matches('input[data-gfield]')) setTimeout(() => e.target.select(), 0); });
+  $('details').onkeydown = (e) => { if (e.key === 'Enter' && e.target.matches('input[data-gfield]')) e.target.blur(); };
   $('list').onkeydown = (e) => {
     const step = { ArrowDown: 1, ArrowUp: -1, PageDown: 20, PageUp: -20 }[e.key];
     if (!step || !state.decoded.length) return;
