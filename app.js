@@ -146,6 +146,8 @@
       } },
     velCurve: { label: 'Velocity curve', options: [...Array.from({ length: 8 }, (_, v) => [v, `Curve ${v + 1}`]), [8, 'Constant']] },
     ribbonMidiCh: { label: 'Long Ribbon MIDI channel', options: [...Array.from({ length: 16 }, (_, v) => [v, String(v + 1)]), [16, 'Global']], text: chText },
+    ...Object.fromEntries(R.CC_MAP_NAMES.map((n, k) => [`ccMap${k}`,
+      { label: `CC# map: ${n}`, options: R.CC_MAP_VALUES.map((v) => [v, v < 0 ? 'Off' : ccText(v)]), text: (v) => (v < 0 ? 'Off' : ccText(v)) }])),
     ...Object.fromEntries(R.KEYS.map((n, k) => [`userScale${k}`,
       { label: `User scale ${n}`, options: Array.from({ length: 127 }, (_, j) => j - 63).map((c) => [c, String(c)]) }])),
   };
@@ -275,6 +277,11 @@
       section('GLOBAL', gEditor('TRANSPOSE', 'transpose') + gEditor('VELOCITY CURVE', 'velCurve') +
         gEditor('LONG RIBBON MIDI CH', 'ribbonMidiCh') + gInput('MASTER TUNE', 'masterTune', 'Hz'), ' grid1') +
       section('USER SCALE', `<div class="kbd">${whites}${blacks}</div>`, ' uscale span2') +
+      // CC# MAP: which CC each switch/ribbon parameter sends and receives. Two columns (1~32, 33~64) like the Sound Editor.
+      section('CC# MAP', R.CC_MAP_NAMES.map((n, k) => {
+        const key = `ccMap${k}`;
+        return `<div class="field ccrow${key in state.globalEdit ? ' modified' : ''}"><span class="name">${esc(n)}</span>${options(key, 'val')}</div>`;
+      }).join(''), ' ccmap span3') +
       `</div>`;
   }
 

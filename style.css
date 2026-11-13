@@ -181,6 +181,15 @@ button, select { font-family: inherit; font-size: 12px; }
 .save:disabled { background: #4a4a4a; border-color: #555; color: #888; -webkit-text-fill-color: #888; opacity: 1; cursor: default; }
 
 /* GLOBAL page: same grid as the program page. GLOBAL takes 1 column, USER SCALE 2 (wide layout). */
+/* CC# MAP: name + dropdown per row; one column, two (1~32 | 33~64) in the wide layout. @media, not @container:
+   the iPad's WebKit ignores container queries. */
+.sect.ccmap .sect-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px 28px; }
+.ccrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ccrow .name { font: 11px var(--ui-font); color: #e8e8e8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.field.ccrow select.val { width: 96px; flex: none; min-height: 19px; padding-top: 1px; padding-bottom: 1px; }
+@media (min-width: 890px) {
+  .sect.ccmap .sect-body { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(32, auto); grid-auto-flow: column; }
+}
 /* Text field with a unit (MASTER TUNE ... Hz). appearance: none so WebKit keeps our border. */
 .field .with-unit { display: flex; align-items: center; gap: 6px; }
 .field input.val { -webkit-appearance: none; appearance: none; width: 80px; flex: none; outline: none; -webkit-text-fill-color: #f4f4f4; }

@@ -78,6 +78,22 @@
     T1_OSC1_PCM_WAVE: [0x11, 0x1B],        // 0~84, see PCM_WAVES (spec says 0~64; the keytar takes 0~84)
     T2_LONG_RIBBON_FILTER_INT: [0x22, 0x16],
   };
+  // Switch & Ribbon Slider CC# map (global bytes 32~95, *T07-2), names as in the Sound Editor's CC# MAP page.
+  const CC_MAP_NAMES = [
+    'Portamento', 'Unison SW', 'OSC 1 Wave', 'OSC 1 Mod', 'OSC 1 Control 1', 'OSC 1 Control 2', 'OSC 2 Wave', 'OSC 2 Mod',
+    'OSC 2 Semitone', 'OSC 2 Tune', 'OSC 1 Level', 'OSC 2 Level', 'Noise Level', 'Filter Routing', 'Filter 1 Type Balance',
+    'Filter 1 Cutoff', 'Filter 1 Resonance', 'Filter 1 EG Int', 'Filter 1 Key Track', 'Filter 2 Type', 'Filter 2 Cutoff',
+    'Filter 2 Resonance', 'Filter 2 EG Int', 'Filter 2 Key Track', 'Amp Level', 'Panpot', 'Drive/WS Depth', 'Filter EG Attack',
+    'Filter EG Decay', 'Filter EG Sustain', 'Filter EG Release', 'Amp EG Attack',
+    'Amp EG Decay', 'Amp EG Sustain', 'Amp EG Release', 'LFO 1 Wave', 'LFO 1 Frequency', 'LFO 2 Wave', 'LFO 2 Frequency',
+    'Virtual Patch 1 Int', 'Virtual Patch 2 Int', 'Virtual Patch 3 Int', 'Virtual Patch 4 Int', 'Virtual Patch 5 Int',
+    'Long Ribbon "FILTER"', 'Long Ribbon "FILTER" Int', 'EQ High Gain', 'EQ Low Gain', 'FX 1 Dry/Wet', 'FX 1 LongRibbon "FILTER"',
+    'FX 2 Dry/Wet', 'FX 2 LongRibbon "FILTER"', 'Vocoder Threshold', 'Vocoder HPF Level', 'Vocoder HPF Gate',
+    'Vocoder Direct Level', 'Vocoder In Src 1 Level', 'Vocoder In Src 2 Level', 'Vocoder Level', 'Vocoder Formant Shift',
+    'Vocoder FC Offset', 'Vocoder Resonance', 'Vocoder FC Mod.Int', 'Vocoder E.F.Sens',
+  ];
+  // Values a CC# map entry can take: -1 = Off, CC#00~95, CC#102~119.
+  const CC_MAP_VALUES = [-1, ...Array.from({ length: 96 }, (_, v) => v), ...Array.from({ length: 18 }, (_, v) => 102 + v)];
   const ARP_TYPES = ['Up', 'Down', 'Alt1', 'Alt2', 'Random', 'Trigger'];
   const OSC1_WAVES = ['Saw', 'Pulse', 'Triangle', 'Sine', 'Formant', 'Noise', 'PCM/DWGS', 'Audio In'];
   // PCM/DWGS waves 0~84, names as in the KORG Sound Editor (its *SynthPcm table). 131 M1 Piano = 0, 132 ToyPiano = 1.
@@ -244,7 +260,8 @@
       midiChannel: d[4] & 0x0F,            // 0~15 = ch 1~16. Read only: the keytar ignores it in a received dump (verified)
       progChgFilter: d[9] & 1,
       ...Object.fromEntries(Array.from({ length: 12 }, (_, k) => [`userScale${k}`, signed(d[16 + k])])), // C..B, -63~+63 cents
-      ribbonMidiCh: d[28],                 // 0~15 = ch 1~16, 16 = Global
+      ribbonMidiCh: d[28],
+      ...Object.fromEntries(Array.from({ length: 64 }, (_, k) => [`ccMap${k}`, signed(d[32 + k])])), // -1 = Off, else CC#                 // 0~15 = ch 1~16, 16 = Global
       favorites: Array.from(d.slice(100, 140)), // 5 banks x 8 (A..H), 0-based program numbers
     };
   }
@@ -257,6 +274,7 @@
       else if (key === 'transpose') out[1] = v & 0xFF;
       else if (key === 'velCurve') out[3] = (out[3] & 0xF0) | (v & 0x0F);
       else if (key === 'ribbonMidiCh') out[28] = v;
+      else if (/^ccMap\d+$/.test(key)) out[32 + +key.slice(5)] = v & 0xFF;
       else if (/^userScale\d+$/.test(key)) out[16 + +key.slice(9)] = v & 0xFF;
     }
     return out;
@@ -299,6 +317,7 @@
   global.RK100S = {
     PROGRAM_SIZE, GLOBAL_SIZE, NUM_PROGRAMS, FUNC,
     CATEGORIES, VOICE_MODES, TIMBRE_SELECT, SCALE_TYPES, KEYS, RIBBON_SCALES, ARP_TYPES, ARP_RESOLUTIONS, OSC1_WAVES, PCM_WAVES, PARAM,
+    CC_MAP_NAMES, CC_MAP_VALUES,
     unpack7, pack7, msg, parseSysex, decodeProgram, decodeGlobal, encodeGlobal, parseLibraryFile,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
