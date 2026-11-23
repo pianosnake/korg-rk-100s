@@ -1,21 +1,36 @@
-# RK-100S Programs (simple viewer)
+# KORG RK-100S Programs
 
-A stripped-down version of `../rk100s-web`. It sends a Program Change when you click a program, a Parameter Change when you change a dropdown, and a program write when you press **Save**.
+A Web MIDI page for the KORG RK-100S keytar. It lists the keytar's 200 programs and favorites, selects programs, and edits the program's arpeggiator, scale and ribbon settings, along with the global settings. It has no libraries and needs no network access.
 
-```sh
-python3 serve.py          # opens http://localhost:8766 in Google Chrome
+## Features
+
+- **Programs and favorites:** receive all programs and the favorites from the keytar. They're saved in the browser and shown on the next visit.
+- **Select:** tap a program to select it on the keytar.
+- **Edit:** the arpeggiator, scale, scale key and Long Ribbon settings are dropdowns. A change is sent at once and shows a yellow border. **SAVE** stores the program on the keytar, then reads it back to check it.
+- **GLOBAL** (globe button): the MIDI ports, transpose, velocity curve, master tune, user scale and CC# map, with their own **SAVE**.
+
+## Running it
+
+The page needs a browser with Web MIDI and SysEx. Allow both when the browser asks. Without SysEx it can still select programs, but it can't load them.
+
+### On a computer (Chrome)
+
+1. Connect the RK-100S with a USB cable.
+2. Start a web server in this folder and open http://localhost:8000 in Chrome:
 ```
+python3 -m http.server 8000
+```
+3. Allow MIDI device control (with SysEx) when Chrome asks.
 
-- No port menus or Connect button (it's meant to run inside an AUv3 host). It uses the keytar's ports by name if present (In `RK-100S KBD/RIBBON`, Out `RK-100S SOUND`), otherwise the first connected In and Out. It reconnects when devices change. Hover the channel pill to see which ports are in use.
-- Handshake: Device Inquiry first. If that gets no answer (some hosts drop universal SysEx), it asks for the edit buffer on channel 1. Any RK-100S SysEx that arrives later also counts. With no SysEx at all the pill says **Send only**: Program Changes still go out, but programs can't be loaded.
-- Connecting only asks for the keytar's identity (and, if programs are cached, its edit buffer to find the current program). Press **Load programs** (later **Reload**) to receive the favorites (global dump) and all 200 programs (about 2 s). They're cached in the browser and shown on the next visit.
-- Follows Program Changes from the keytar. The current program is red in the list and in the favorites grid.
-- Picks up global or program dumps the keytar sends on its own (favorites, programs).
-- Clicking a program in the list selects it on the keytar (Bank MSB 0, Bank LSB 0/1, Program Change on the global channel) and shows its details on the right. The keytar only follows if Program Change is enabled in its global settings (ProgChg Filter).
-- **SAVE** sends PROGRAM WRITE REQUEST (`11 pp PP`, 10 bytes), which stores the keytar's edit buffer into the program's slot. The keytar answers WRITE COMPLETED (`21`). The page then reads the slot back and checks every edited field is there. The message is short on purpose: AUv3 hosts on iPad dropped the ~400-byte program dump used before. For 129-200 it also checks that slot 1-72 wasn't hit by mistake and restores it if it was.
-- Clicking a favorite or using the arrow keys only shows details. Nothing is sent.
-- **Arpeggiator** is one dropdown: Off sends `60:01`=0. A type sends `61:00`=type, then `60:01`=1.
-- **Scale** and **scale key** (`00:17`, `00:1E`) and the Long Ribbon **scale type**, **scale range** and **pitch range** (`70:00`, `70:01`, `70:02`) are dropdowns. Picking a value sends PARAMETER CHANGE (func 41h). Ranges are sent as plain −8…+8 octaves, not with the +64 offset the dump uses. This changes the keytar's edit buffer only, like turning a knob. Each changed field gets a yellow border and the yellow **SAVE** button next to the program name becomes active. Changes are lost on the next program change unless you save. If the program isn't selected on the keytar yet, it's selected first.
-- On connect it asks for the edit buffer and matches it against the 200 programs, so it can mark the current program before you change one. This only works while the sound is unedited.
+### On an iPad (MIDIWeb or Web MIDI Browser)
 
-`rk100s.js` is copied from `../rk100s-web`, with `msg.parameterChange` and `PARAM` added.
+1. Install [MIDIWeb](https://midiweb.app/) (iPadOS 17 and later) or [Web MIDI Browser](https://apps.apple.com/us/app/web-midi-browser/id953846217), which also runs on older iPads.
+2. Connect the RK-100S with a USB cable and a Lightning or USB-C adapter.
+3. Put the page somewhere the iPad can reach, either:
+   - on a web host (for example GitHub Pages), or
+   - from a computer on the same Wi-Fi
+4. Open that address in the app.
+
+## Ports
+
+By default the page uses the keytar's own ports: In `RK-100S KBD/RIBBON` and Out `RK-100S SOUND`. When those aren't found, it uses the first In and Out. To pick other ports, use the **IN** and **OUT** menus at the top of the **GLOBAL** page. Your choice is remembered, and **auto** goes back to the default.

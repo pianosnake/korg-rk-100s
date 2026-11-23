@@ -8,7 +8,9 @@
   --ui-font: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 * { box-sizing: border-box; }
+/* No zooming on the iPad: pan-x pan-y leaves out pinch zoom and double-tap zoom (app.js also blocks Safari's pinch gesture). */
 html, body { height: 100%; }
+html { touch-action: pan-x pan-y; }
 body {
   margin: 0; display: flex; font-family: var(--ui-font); font-size: 13px;
   background: #111; color: var(--panel-text);
@@ -20,25 +22,34 @@ button, select { font-family: inherit; font-size: 12px; }
   width: 380px; flex: none; height: 100vh; display: flex; flex-direction: column; gap: 4px;
   background: var(--red); padding: 10px 12px 12px; border-right: 4px solid var(--red-dark);
 }
-.brand { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+.brand { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 6px; }
+/* The connection pill sits under the logo, left of the buttons. */
+.logo { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; }
+.logo-text { display: flex; align-items: baseline; gap: 12px; }
+.logo .status { font-size: 11px; }
 .brand .korg { font: 900 26px/1 "Arial Black", Impact, sans-serif; letter-spacing: -1px; color: #e5d2d2; }
 .brand .model { font: 700 17px/1 Arial, sans-serif; color: #e5d2d2; }
 
-/* Reload with GLOBAL under it, at the right of the logo. */
-.side-buttons { margin-left: auto; align-self: flex-start; display: flex; flex-direction: column; gap: 4px; }
-#btn-reload, #btn-global {
-  -webkit-appearance: none; appearance: none; -webkit-text-fill-color: #fff;
-  padding: 2px 8px; border: 1px solid #222; border-radius: 3px; cursor: pointer; color: #fff;
+/* Reload and GLOBAL as two icon buttons side by side, at the right of the logo. */
+.side-buttons { margin-left: auto; align-self: flex-start; display: flex; gap: 6px; }
+button.icon {
+  -webkit-appearance: none; appearance: none; margin: 0; padding: 0; width: 30px; height: 30px; flex: none;
+  display: grid; place-items: center; border: 1px solid #222; border-radius: 4px; cursor: pointer; color: #fff;
   background: linear-gradient(#8a8a8a, #4b4b4b);
 }
-#btn-reload:disabled { opacity: .45; cursor: default; }
-#btn-global.active { background: linear-gradient(#f2f2f2, #c4c4c4); color: #000; -webkit-text-fill-color: #000; box-shadow: inset 0 1px 2px rgba(0,0,0,.35); }
+button.icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+button.icon:disabled { opacity: .45; cursor: default; }
+#btn-global.active { background: linear-gradient(#f2f2f2, #c4c4c4); color: #000; box-shadow: inset 0 1px 2px rgba(0,0,0,.35); }
+/* The X that closes the GLOBAL page, at the right of its header. */
+.det-head .close { margin-left: auto; align-self: flex-start; }
 .status-line { font-size: 11px; min-height: 18px; display: flex; gap: 6px; align-items: center; color: #f4dede; }
 .status { padding: 1px 7px; border-radius: 9px; white-space: nowrap; }
 .status.off { background: #5b5b5b; color: #ddd; }
 .status.on { background: #2f8f3a; color: #fff; }
 .status.warn { background: #d08a00; color: #fff; }
-#status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Under the program list, at the bottom of the column. Long messages wrap (up to 3 lines) rather than get cut off. */
+.status-line { margin-top: 2px; }
+#status-text { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 
 .caption { font-size: 9px; font-weight: 700; letter-spacing: .3px; color: #f4dede; margin-top: 6px; }
 
@@ -198,7 +209,11 @@ button, select { font-family: inherit; font-size: 12px; }
 .field .val.invalid, .field.modified .val.invalid { border-color: #e03030; box-shadow: 0 0 0 1px #e03030; }
 /* One octave drawn like the old editor: outlined white keys, black keys over the gaps, a cents box in each.
    Sized in % of the keyboard (no container units: the iPad's WebKit ignores cqw), up to 46px per white key. */
-.kbd { position: relative; display: flex; width: 100%; max-width: 323px; height: 116px; margin-top: 3px; background: #000; }
+/* USER SCALE: the section is as tall as its row (GLOBAL beside it is taller); the keyboard sits in its middle. */
+.sect.uscale { display: flex; flex-direction: column; }
+.sect.uscale .sect-title { align-self: flex-start; }
+.sect.uscale .sect-body { flex: 1; display: flex; align-items: center; justify-content: center; padding-top: 12px; }
+.kbd { position: relative; display: flex; width: 100%; max-width: 323px; height: 116px; margin: 0; background: #000; }
 .kbd .wkey {
   flex: 1 1 0; min-width: 0; border: 1px solid #bbb; margin-right: -1px;
   display: flex; align-items: flex-end; justify-content: center; padding-bottom: 5px;
@@ -235,4 +250,44 @@ button, select { font-family: inherit; font-size: 12px; }
 }
 @media (max-width: 760px) {
   .details { padding: 16px 14px; }
+}
+
+/* ---------- touch screens (the iPad) ----------
+   Bigger text, less padding. pointer: coarse leaves the desktop layout alone. */
+@media (pointer: coarse) {
+  body { font-size: 15px; }
+  button, select { font-size: 14px; }
+  .side { padding: 6px 8px 8px; gap: 3px; }
+  .brand { margin-bottom: 3px; }
+  .status-line, .logo .status { font-size: 13px; }
+  .caption { font-size: 11px; margin-top: 4px; }
+  #fav-table { font-size: 14px; border-spacing: 3px 2px; padding: 2px 3px; }
+  #fav-table th { font-size: 11px; }
+  #fav-table td { line-height: 20px; }
+  .list { font-size: 15px; }
+  .row { gap: 6px; padding: 2px 4px; line-height: 20px; }
+  .row .num { width: 30px; }
+  .row .mode { width: 44px; font-size: 13px; }
+  .row .rscale, .row .cat { font-size: 13px; }
+
+  .details { padding: 12px 14px; }
+  .det-head { gap: 8px 14px; margin-bottom: 12px; }
+  .det-num { padding: 5px 9px; }
+  .sect-grid { gap: 12px 10px; }
+  .sect { margin-bottom: 12px; }
+  .sect-title { font-size: 14px; padding: 2px 30px 2px 7px; }
+  .sub-title { font-size: 13px; padding: 2px 26px 2px 7px; margin-left: -9px; }
+  .sect-body { padding: 6px 9px 8px; }
+  .sect.uscale .sect-body { padding-top: 8px; }
+  .step-edit { margin: 8px -9px -8px; padding: 0 9px 8px; }
+  .sect.grid2 .sect-body, .sect.grid3 .sect-body { gap: 4px 12px; }
+  .field .cap { font-size: 11px; }
+  .field .val { font-size: 15px; padding: 2px 5px; min-height: 26px; }
+  .field select.val { padding: 2px 20px 2px 5px; line-height: 20px; }
+  .field .check, .field .unit { font-size: 15px; }
+  .step .n, .step-row .shift { font-size: 13px; }
+  .ccrow .name { font-size: 13px; }
+  .field.ccrow select.val { width: 110px; min-height: 24px; }
+  .kbd .cents { font-size: 13px; }
+  .save { font-size: 15px; padding: 5px 16px; }
 }

@@ -157,7 +157,7 @@
   function renderDetails() {
     const el = $('details');
     $('btn-global').classList.toggle('active', state.page === 'global');
-    if (state.page === 'global') { el.innerHTML = globalPage(); return; }
+    if (state.page === 'global') { el.innerHTML = globalPage(); renderPorts(); return; }
     const i = state.viewed;
     const stored = i != null ? state.decoded[i] : null;
     if (!stored) { el.innerHTML = '<div class="empty">Click a program to see its details.</div>'; return; }
@@ -249,8 +249,18 @@
     const anyEdits = Object.keys(state.globalEdit).length > 0;
     const head = `<div class="det-head"><div class="det-name">GLOBAL</div>` +
       `<button id="btn-save-global" class="save"${anyEdits && !state.busy ? '' : ' disabled'} ` +
-      `title="${anyEdits ? 'Write the global settings to the keytar' : 'No changes to save'}">SAVE</button></div>`;
-    if (!state.global) return `${head}<div class="empty">Not read yet: connect the keytar (with SysEx both ways).</div>`;
+      `title="${anyEdits ? 'Write the global settings to the keytar' : 'No changes to save'}">SAVE</button>` +
+      `<button id="btn-close-global" class="icon close" title="Close the global settings" aria-label="Close">` +
+      `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;
+    const section = (title, body, extra = '') =>
+      `<section class="sect${extra}"><div class="sect-title">${title}</div><div class="sect-body">${body}</div></section>`;
+    // The IN / OUT port menus (filled by renderPorts). Shown before the keytar's data is read: they're how it gets found.
+    const portField = (caption, id, tip) =>
+      `<div class="field"><div class="cap">${caption}</div><select class="val" id="${id}" title="${esc(tip)}"></select></div>`;
+    const ports = section('MIDI PORTS',
+      portField('IN', 'in-port', "The MIDI port the keytar's messages come in on (normally RK-100S KBD/RIBBON).") +
+      portField('OUT', 'out-port', 'The MIDI port that goes to the keytar (normally RK-100S SOUND).'), ' grid2 span3');
+    if (!state.global) return `${head}<div class="sect-grid">${ports}</div><div class="empty">Not read yet: connect the keytar (with SysEx both ways).</div>`;
     const g = { ...R.decodeGlobal(state.global), ...state.globalEdit };
     const options = (key, cls = '') => {
       const f = GLOBAL_FIELDS[key];
@@ -271,9 +281,7 @@
     const whites = [0, 2, 4, 5, 7, 9, 11].map((k) => `<div class="wkey">${box(k)}</div>`).join('');
     const blacks = [[1, 1], [3, 2], [6, 4], [8, 5], [10, 6]]
       .map(([k, gap]) => `<div class="bkey" style="--gap: ${gap}">${box(k)}</div>`).join('');
-    const section = (title, body, extra = '') =>
-      `<section class="sect${extra}"><div class="sect-title">${title}</div><div class="sect-body">${body}</div></section>`;
-    return head + `<div class="sect-grid">` +
+    return head + `<div class="sect-grid">` + ports +
       section('GLOBAL', gEditor('TRANSPOSE', 'transpose') + gEditor('VELOCITY CURVE', 'velCurve') +
         gEditor('LONG RIBBON MIDI CH', 'ribbonMidiCh') + gInput('MASTER TUNE', 'masterTune', 'Hz'), ' grid1') +
       section('USER SCALE', `<div class="kbd">${whites}${blacks}</div>`, ' uscale span2') +
@@ -557,32 +565,98 @@
     };
   }
 
-  // Ports to use: the keytar's own ports by name if present
-  // (In "RK-100S KBD/RIBBON", Out "RK-100S SOUND"), otherwise the first connected port.
-  function pickPorts() {
-    const pick = (ports, prefer) => {
-      const list = Array.from(ports.values()).filter((p) => p.state !== 'disconnected');
-      const rk = list.filter((p) => /RK-?100S/i.test(p.name));
-      return rk.find((p) => prefer.test(p.name)) || rk[0] || list[0] || null;
-    };
-    return { input: pick(midi.access.inputs, /KBD|RIBBON/i), output: pick(midi.access.outputs, /SOUND/i) };
+  // The ports of a MIDIInputMap / MIDIOutputMap. Walked with next() by hand: the iOS "Web MIDI Browser" app's maps give
+  // an iterator that isn't iterable, so Array.from(map.values()) comes back empty there (no ports found).
+  function portsOf(map) {
+    const out = [];
+    if (!map) return out;
+    const it = map.values();
+    for (let o = it.next(); !o.done; o = it.next()) out.push(o.value);
+    return out;
   }
 
+  // Ports are kept apart by id: two can share a name (in the iOS Web MIDI Browser app every Bluetooth port is just
+  // "Bluetooth"). A name shared by several ports is shown with a number, in port order ("Bluetooth 1", "Bluetooth 2").
+  const live = (map) => portsOf(map).filter((p) => p.state !== 'disconnected');
+  function labelOf(list, p) {
+    const same = list.filter((q) => q.name === p.name);
+    return same.length > 1 ? `${p.name} ${same.indexOf(p) + 1}` : p.name;
+  }
+
+  // The IN / OUT PORT menus: "auto" or a port the user picked, saved by id and name (the id first; a name only when
+  // one port has it, as ids can change between sessions). A saved port that isn't connected now isn't listed, but it
+  // stays saved and is picked up again when it comes back.
+  const PORTS_KEY = 'rk100s-ports';
+  const portChoice = (() => {
+    try { return JSON.parse(localStorage.getItem(PORTS_KEY) || 'null') || {}; } catch (e) { return {}; }
+  })();
+  function saveChoice() { try { localStorage.setItem(PORTS_KEY, JSON.stringify(portChoice)); } catch (e) { /* private mode */ } }
+  function chosen(list, c) {
+    if (!c) return null;
+    const same = list.filter((p) => p.name === c.name);
+    return list.find((p) => String(p.id) === String(c.id)) || (same.length === 1 ? same[0] : null);
+  }
+
+  // Ports to use: the ones picked in the menus; otherwise the keytar's own ports by name
+  // (In "RK-100S KBD/RIBBON", Out "RK-100S SOUND"), otherwise the first connected port.
+  function pickPorts() {
+    const pick = (list, c, prefer) => {
+      const rk = list.filter((p) => /RK-?100S/i.test(p.name));
+      return chosen(list, c) || rk.find((p) => prefer.test(p.name)) || rk[0] || list[0] || null;
+    };
+    return { input: pick(live(midi.access.inputs), portChoice.input, /KBD|RIBBON/i),
+      output: pick(live(midi.access.outputs), portChoice.output, /SOUND/i) };
+  }
+
+  function renderPorts() {
+    const fill = (el, list, cur, c) => {
+      const missing = c && !chosen(list, c);
+      el.innerHTML = '<option value="">auto</option>' +
+        (missing ? `<option value="saved" disabled>${esc(c.name)} (not connected)</option>` : '') +
+        list.map((p) => `<option value="${esc(p.id)}">${esc(labelOf(list, p))}</option>`).join('');
+      // The menu shows the choice, not the port in use: that one is null while a newly picked port is still opening
+      // (and port changes re-render meanwhile), which made a pick read "auto" again.
+      el.value = missing ? 'saved' : c ? String(chosen(list, c).id) : '';
+    };
+    // The menus are on the GLOBAL page only; not there otherwise.
+    if (!midi.access || !$('in-port')) return;
+    fill($('in-port'), live(midi.access.inputs), midi.input, portChoice.input);
+    fill($('out-port'), live(midi.access.outputs), midi.output, portChoice.output);
+  }
+
+  function onPortMenu(kind, map) {
+    return (e) => {
+      if (!midi.access) return;
+      const p = live(map()).find((q) => String(q.id) === e.target.value);
+      portChoice[kind] = p ? { id: p.id, name: p.name } : null;
+      saveChoice();
+      autoConnect();
+      renderPorts();
+    };
+  }
+  const onInPort = onPortMenu('input', () => midi.access.inputs), onOutPort = onPortMenu('output', () => midi.access.outputs);
+
   function autoConnect() {
-    if (!midi.access || midi.connecting) return;
+    if (!midi.access) return;
+    renderPorts();
+    if (midi.connecting) return;
     const { input, output } = pickPorts();
     if (midi.connected) {
       // Switch over if better ports showed up (e.g. the keytar was plugged in after another device).
-      if (input === midi.input && output === midi.output) return;
+      // By id: some hosts hand out new port objects on each lookup.
+      const same = (a, b) => a && b && String(a.id) === String(b.id);
+      if (same(input, midi.input) && same(output, midi.output)) return;
       disconnect();
     }
-    if (input && output) connect(input, output);
-    else { setConn('No MIDI device', 'off'); setStatus('Waiting for a MIDI device…'); }
+    if (input && output) connect(input, output).catch((e) => { setConn("Can't open port", "warn"); setStatus(String(e.message || e)); }).finally(renderPorts);
+    else { setConn('No MIDI device', 'off'); setStatus(`Waiting for a MIDI ${!input && !output ? 'device' : !input ? 'input' : 'output'}… (the ports are on the GLOBAL page)`); }
   }
 
   function renderButtons() {
     $('btn-reload').disabled = !midi.connected || state.busy;
-    $('btn-reload').textContent = state.programs.length ? 'Reload' : 'Load programs';
+    const what = state.programs.length ? 'Reload' : 'Load programs';
+    $('btn-reload').title = `${what}: receive all programs and favorites from the keytar`;
+    $('btn-reload').setAttribute('aria-label', what);
   }
 
   function disconnect() {
@@ -626,7 +700,7 @@
       } catch (e2) {
         if (!midi.identified) {
           setConn('Send only', 'warn');
-          setStatus(`No SysEx from the keytar on "${midi.input.name}". Program changes are still sent; loading programs needs the keytar's MIDI (with SysEx) routed in.`);
+          setStatus(`No SysEx from the keytar on "${midi.input.name}". Program changes are still sent; loading programs needs the keytar's MIDI (with SysEx) routed in. The IN and OUT ports are on the GLOBAL page.`);
         }
         return;
       }
@@ -638,9 +712,9 @@
       await findCurrentProgram();
       renderAll();
       if (state.current != null) scrollToRow(state.current);
-      setStatus('Connected. Press Reload to refresh');
+      setStatus('Connected. Press the reload button (↻) to refresh.');
     } else {
-      setStatus('Connected. Press Load programs to receive the 200 programs.');
+      setStatus('Connected. Press the reload button (↻) to receive the 200 programs.');
     }
   }
 
@@ -696,6 +770,7 @@
   $('details').onclick = (e) => {
     if (e.target.id === 'btn-save') { saveProgram(); return; }
     if (e.target.id === 'btn-save-global') { saveGlobal(); return; }
+    if (e.target.closest('#btn-close-global')) { state.page = 'program'; renderDetails(); return; }
     const i = state.viewed;
     if (i == null || !state.decoded[i]) return;
     const p = withEdits(state.decoded[i], state.edit && state.edit.prog === i ? state.edit.values : {});
@@ -711,6 +786,8 @@
     }
   };
   $('details').onchange = (e) => {
+    if (e.target.id === 'in-port') { onInPort(e); return; }
+    if (e.target.id === 'out-port') { onOutPort(e); return; }
     const gkey = e.target.dataset.gfield;
     if (gkey && GLOBAL_FIELDS[gkey].input) {
       // Text field: only a valid value becomes an edit; leaving it with an invalid one puts the last valid value back.
@@ -739,6 +816,11 @@
   };
 
   // ------------------------------------------------------------ boot
+  // No zooming on the iPad: Safari ignores user-scalable=no for pinches, so its gesture events are cancelled, and so is
+  // any move with two fingers down (double-tap zoom is off through touch-action in style.css).
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach((t) => document.addEventListener(t, (e) => e.preventDefault(), { passive: false }));
+  document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+
   restore();
   renderAll();
   initMidi().then(autoConnect);
