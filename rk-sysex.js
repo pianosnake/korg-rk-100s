@@ -1,5 +1,5 @@
 // RK-100S protocol + data model (per the official KORG RK-100S MIDI Implementation).
-// Plain script (no modules) so the page also works when opened straight from disk.
+// RkSysEx: plain script (no modules), window.RkSysEx on the page; require() in Node sets globalThis.RkSysEx (tests).
 (function (global) {
   'use strict';
 
@@ -143,7 +143,7 @@
     currentProgramDumpRequest: (ch) => [...header(ch), FUNC.CURRENT_PROGRAM_DUMP_REQUEST, 0xF7],
     programDumpRequest: (ch, prog) =>
       [...header(ch), FUNC.PROGRAM_DUMP_REQUEST, prog & 0x7F, (prog >> 7) & 0x7F, 0xF7],
-    // GLOBAL DATA DUMP (func 51) to the keytar: saves into Internal Memory, replies 23 (ACK) / 24 (NAK). 195 bytes.
+    // GLOBAL DATA DUMP (func 51) to the keytar: saves into Internal Memory, replies 23 (ACK) / 24 (NAK). 196 bytes.
     globalDump: (ch, data) => [...header(ch), FUNC.GLOBAL_DUMP, ...pack7(Array.from(data)), 0xF7],
     currentProgramDump: (ch, data) =>
       [...header(ch), FUNC.CURRENT_PROGRAM_DUMP, ...pack7(Array.from(data)), 0xF7],
@@ -260,8 +260,8 @@
       midiChannel: d[4] & 0x0F,            // 0~15 = ch 1~16. Read only: the keytar ignores it in a received dump (verified)
       progChgFilter: d[9] & 1,
       ...Object.fromEntries(Array.from({ length: 12 }, (_, k) => [`userScale${k}`, signed(d[16 + k])])), // C..B, -63~+63 cents
-      ribbonMidiCh: d[28],
-      ...Object.fromEntries(Array.from({ length: 64 }, (_, k) => [`ccMap${k}`, signed(d[32 + k])])), // -1 = Off, else CC#                 // 0~15 = ch 1~16, 16 = Global
+      ribbonMidiCh: d[28],                 // 0~15 = ch 1~16, 16 = Global
+      ...Object.fromEntries(Array.from({ length: 64 }, (_, k) => [`ccMap${k}`, signed(d[32 + k])])), // -1 = Off, else CC#
       favorites: Array.from(d.slice(100, 140)), // 5 banks x 8 (A..H), 0-based program numbers
     };
   }
@@ -314,7 +314,7 @@
     return { programs, meta, globalData };
   }
 
-  global.RK100S = {
+  global.RkSysEx = {
     PROGRAM_SIZE, GLOBAL_SIZE, NUM_PROGRAMS, FUNC,
     CATEGORIES, VOICE_MODES, TIMBRE_SELECT, SCALE_TYPES, KEYS, RIBBON_SCALES, ARP_TYPES, ARP_RESOLUTIONS, OSC1_WAVES, PCM_WAVES, PARAM,
     CC_MAP_NAMES, CC_MAP_VALUES,

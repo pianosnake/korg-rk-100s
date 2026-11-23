@@ -1,7 +1,9 @@
 // RK-100S program viewer: connect, list the 200 programs + favorites, follow the keytar.
 (function () {
   'use strict';
-  const R = window.RK100S;
+  const R = window.RkSysEx;
+  const E = window.RkEdits; // field tables and unsaved edits (rk-edits.js)
+  const { FIELDS, GLOBAL_FIELDS } = E;
   const $ = (id) => document.getElementById(id);
   const pad3 = (n) => String(n).padStart(3, '0');
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -12,19 +14,48 @@
     decoded: [],         // decodeProgram() results
     favorites: null,     // 40 program numbers (5 banks x A..H)
     global: null,        // raw 164-byte global data (TABLE 7)
-    globalEdit: {},
-    page: 'program',     // right pane: 'program' (details of state.viewed) or 'global' (GLOBAL button)      // unsaved global changes {field: value}; sent with SAVE GLOBAL (globals have no Parameter Change)
-    edit: null,          // unsaved changes in the keytar's edit buffer: {prog, values: {field: value}}
+    page: 'program',     // right pane: 'program' (details of state.viewed) or 'global' (GLOBAL button)
     progChgOn: true,     // Global "ProgChg Filter": keytar ignores Program Change when disabled
     current: null,       // program selected on the keytar
     viewed: null,        // program shown in the details pane
     busy: false,
   };
-  const midi = { access: null, input: null, output: null, channel: 0, connected: false, waiter: null, bank: 0 };
+  const progEdits = new E.ProgramEdits();   // unsaved changes in the keytar's edit buffer
+  const globalEdits = new E.GlobalEdits();  // unsaved global changes; sent with SAVE GLOBAL
+  // The connection to the keytar (rk-link.js): ports, sending, request/reply. The page reacts through these handlers.
+  const link = new window.RkLink({
+    conn: setConn,
+    status: setStatus,
+    change: () => { renderButtons(); renderPorts(); },
+    connected: handshake,
+    sysex: onKeytarSysex,
+    programChange: (prog) => setCurrent(prog),
+  });
+  const send = (bytes) => link.send(bytes);
+  const request = (bytes, match, opts) => link.request(bytes, match, opts);
 
   // ------------------------------------------------------------ rendering
   function setStatus(t) { $('status-text').textContent = t; }
-  function setConn(text, cls) { const el = $('conn-status'); el.textContent = text; el.className = `status ${cls}`; }
+  function setConn(text, cls) {
+    const el = $('conn-status'); el.textContent = text; el.className = `status ${cls}`;
+    if (link.input) el.title = link.title;
+  }
+
+  // A titled box on the details pane (PROGRAM, SCALE, ARPEGGIATOR… / the GLOBAL page's sections).
+  const section = (title, body, extra = '') =>
+    `<section class="sect${extra}"><div class="sect-title">${title}</div><div class="sect-body">${body}</div></section>`;
+
+  // A request's reply, or an error saying which step got none.
+  async function replyTo(what, promise) {
+    try { return await promise; } catch (e) { throw new Error(`no reply ${what}`); }
+  }
+
+  // Saving needs SysEx both ways: find the keytar if not yet, else say what's wrong. Resolves to true when it's there.
+  async function canSave() {
+    if (!link.identified) await handshake();
+    if (!link.identified) setStatus('Cannot save: no SysEx is coming back from the keytar. Route the keytar\'s MIDI (with SysEx) into this plugin.');
+    return link.identified;
+  }
 
   function renderFavorites() {
     const favs = state.favorites;
@@ -64,96 +95,6 @@
     });
   }
 
-  const noteText = (n) => `${R.KEYS[n % 12]}${Math.floor(n / 12) - 1}`; // 0 = C-1, 60 = C4
-  const ccText = (n) => `CC#${String(n).padStart(2, '0')}`;
-  const signedText = (n) => (n >= 0 ? `+${n}` : `${n}`);
-  const rangeText = (n) => (n < 0 ? `${-n} Octave (Rev)` : `${n} Octave`);
-  // Long Ribbon scale key: -12..+12 semitones around C ("downC ~ C ~ upC").
-  const ribbonKeyText = (n) => {
-    const name = R.KEYS[((n % 12) + 12) % 12];
-    return n < 0 ? `${name} (down)` : n === 12 ? `${name} (up)` : name;
-  };
-
-  // Program fields that can be changed live on the keytar (PARAMETER CHANGE into the edit buffer).
-  const octaves = Array.from({ length: 17 }, (_, k) => k - 8).map((n) => [n, rangeText(n)]);
-  // Arpeggiator as one value: -1 = off, 0..5 = on with that type.
-  const arpValue = (p) => (p.arpOn ? p.arpType : -1);
-  const EDITABLE = {
-    arp: {
-      label: 'Arpeggiator',
-      options: [[-1, 'Off'], ...R.ARP_TYPES.map((n, v) => [v, n])],
-      // Off only switches it off (the stored type stays). A type sets the type, then switches it on.
-      messages: (v) => (v < 0 ? [[...R.PARAM.ARP_ON, 0]] : [[...R.PARAM.ARP_TYPE, v], [...R.PARAM.ARP_ON, 1]]),
-    },
-    // 0~127 = C-1~G9. Only used in Split mode.
-    centerKey: { label: 'Split key', param: R.PARAM.CENTER_KEY, options: Array.from({ length: 128 }, (_, v) => [v, noteText(v)]),
-      enabled: (p) => p.voiceMode === 2 },
-    // 0~15 = ch 1~16, 16+ = Global. Only used in Multi mode.
-    timbre2Ch: { label: 'Timbre 2 MIDI channel', param: R.PARAM.TIMBRE2_MIDI_CH,
-      options: [...Array.from({ length: 16 }, (_, v) => [v, String(v + 1)]), [16, 'Global']], text: (v) => (v >= 16 ? 'Global' : String(v + 1)),
-      enabled: (p) => p.voiceMode === 3 },
-    keySync: { label: 'Arpeggiator key sync', param: R.PARAM.ARP_KEY_SYNC, options: [[0, 'Off'], [1, 'On']] },
-    arpLatch: { label: 'Arpeggiator latch', param: R.PARAM.ARP_LATCH, options: [[0, 'Off'], [1, 'On']] },
-    t1Wave: { label: 'Timbre 1 wave', param: R.PARAM.T1_OSC1_WAVE, options: R.OSC1_WAVES.map((n, v) => [v, n]) },
-    t1PcmWave: { label: 'Timbre 1 wave select', param: R.PARAM.T1_OSC1_PCM_WAVE, options: R.PCM_WAVES.map((n, v) => [v, n]),
-      enabled: (p) => p.t1Wave === 6 }, // only for PCM/DWGS
-    arpResolution: { label: 'Arpeggiator resolution', param: R.PARAM.ARP_RESOLUTION, options: R.ARP_RESOLUTIONS.map((n, v) => [v, n]) },
-    arpLastStep: { label: 'Arpeggiator last step', param: R.PARAM.ARP_LAST_STEP, options: [0, 1, 2, 3, 4, 5, 6, 7].map((v) => [v, String(v + 1)]) },
-    arpOctRange: { label: 'Arpeggiator octave range', param: R.PARAM.ARP_OCTAVE_RANGE, options: [0, 1, 2, 3].map((v) => [v, String(v + 1)]) },
-    // Step 1~8 on/off (STEP EDIT buttons; not drawn by editor()).
-    ...Object.fromEntries(Array.from({ length: 8 }, (_, k) => [`arpStep${k}`,
-      { label: `Arpeggiator step ${k + 1}`, param: R.PARAM.ARP_STEP(k), options: [[0, 'Off'], [1, 'On']] }])),
-    arpTimbre: { label: 'Arp timbre', param: R.PARAM.ARP_TIMBRE, options: R.TIMBRE_SELECT.map((n, v) => [v, n]) },
-    voiceMode: { label: 'Voice mode', param: R.PARAM.VOICE_MODE, options: R.VOICE_MODES.map((n, v) => [v, n]) },
-    scaleType: { label: 'Scale', param: R.PARAM.SCALE_TYPE, options: R.SCALE_TYPES.map((n, v) => [v, n]) },
-    scaleKey: { label: 'Scale key', param: R.PARAM.SCALE_KEY, options: R.KEYS.map((n, v) => [v, n]) },
-    ribbonScaleType: { label: 'Long Ribbon scale type', param: R.PARAM.LONG_RIBBON_SCALE_TYPE, options: R.RIBBON_SCALES.map((n, v) => [v, n]) },
-    ribbonScaleRange: { label: 'Long Ribbon scale range', param: R.PARAM.LONG_RIBBON_SCALE_RANGE, options: octaves },
-    ribbonPitchRange: { label: 'Long Ribbon (pitch) range', param: R.PARAM.LONG_RIBBON_PITCH_RANGE, options: octaves },
-    shortRibbonAssign: { label: 'Short Ribbon modulation assign', param: R.PARAM.SHORT_RIBBON_ASSIGN, options: Array.from({ length: 128 }, (_, v) => [v, ccText(v)]) },
-    // A timbre parameter: sent to the timbre the Long Ribbon controls (both for Timbre 1+2). The edit is kept per
-    // timbre (t1FilterInt / t2FilterInt), so changing TIMBRE SELECT afterwards shows the right timbre's value.
-    filterInt: {
-      label: 'Long Ribbon filter intensity',
-      options: Array.from({ length: 127 }, (_, k) => k - 63).map((n) => [n, signedText(n)]),
-      keys: (p) => [...(p.ribbonTimbre !== 1 ? ['t1FilterInt'] : []), ...(p.ribbonTimbre !== 0 ? ['t2FilterInt'] : [])],
-      messages: (v, p) => EDITABLE.filterInt.keys(p).map((k) => [...(k === 't1FilterInt' ? R.PARAM.T1_LONG_RIBBON_FILTER_INT : R.PARAM.T2_LONG_RIBBON_FILTER_INT), v]),
-    },
-    ribbonTimbre: { label: 'Long Ribbon timbre select', param: R.PARAM.LONG_RIBBON_TIMBRE, options: R.TIMBRE_SELECT.map((n, v) => [v, n]) },
-    // The keytar allows -12..+12 (down C .. up C); the dropdown offers the 12 notes C..B.
-    ribbonScaleKey: { label: 'Long Ribbon scale key', param: R.PARAM.LONG_RIBBON_SCALE_KEY, options: R.KEYS.map((n, v) => [v, n]), text: ribbonKeyText },
-    shortRibbonLock: { label: 'Short Ribbon modulation lock', param: R.PARAM.SHORT_RIBBON_LOCK, options: [[0, 'Lock Off'], [1, 'Lock On']] },
-    shortRibbonSetting: { label: 'Short Ribbon setting', param: R.PARAM.SHORT_RIBBON_SETTING, options: [[0, 'Pitch'], [1, 'Modulation']] },
-  };
-
-  // Stored program with the unsaved edits applied. filterInt follows the (possibly edited) ribbon timbre.
-  function withEdits(stored, edits) {
-    const p = { ...stored, arp: arpValue(stored), ...edits };
-    p.filterInt = p.ribbonTimbre === 1 ? p.t2FilterInt : p.t1FilterInt;
-    return p;
-  }
-  // Global settings. They have no Parameter Change, so edits wait here until SAVE GLOBAL writes the whole global dump.
-  const transposeText = (n) => (n > 0 ? `+${n}` : String(n));
-  const chText = (v) => (v >= 16 ? 'Global' : String(v + 1));
-  const GLOBAL_FIELDS = {
-    transpose: { label: 'Transpose', options: Array.from({ length: 25 }, (_, k) => k - 12).map((n) => [n, transposeText(n)]) },
-    // Text field in Hz: only 430.0~450.0 (one decimal) is accepted; stored as (Hz - 440) x 10.
-    masterTune: { label: 'Master tune', input: true, text: (v) => (440 + v / 10).toFixed(1),
-      parse: (t) => {
-        if (!/^\s*\d{3}(\.\d?)?\s*$/.test(t)) return null;
-        const hz = parseFloat(t);
-        return hz >= 430 && hz <= 450 ? Math.round((hz - 440) * 10) : null;
-      } },
-    velCurve: { label: 'Velocity curve', options: [...Array.from({ length: 8 }, (_, v) => [v, `Curve ${v + 1}`]), [8, 'Constant']] },
-    ribbonMidiCh: { label: 'Long Ribbon MIDI channel', options: [...Array.from({ length: 16 }, (_, v) => [v, String(v + 1)]), [16, 'Global']], text: chText },
-    ...Object.fromEntries(R.CC_MAP_NAMES.map((n, k) => [`ccMap${k}`,
-      { label: `CC# map: ${n}`, options: R.CC_MAP_VALUES.map((v) => [v, v < 0 ? 'Off' : ccText(v)]), text: (v) => (v < 0 ? 'Off' : ccText(v)) }])),
-    ...Object.fromEntries(R.KEYS.map((n, k) => [`userScale${k}`,
-      { label: `User scale ${n}`, options: Array.from({ length: 127 }, (_, j) => j - 63).map((c) => [c, String(c)]) }])),
-  };
-
-  const editLabel = (k) => (k === 't1FilterInt' || k === 't2FilterInt' ? EDITABLE.filterInt.label : EDITABLE[k].label);
-
   function renderDetails() {
     const el = $('details');
     $('btn-global').classList.toggle('active', state.page === 'global');
@@ -161,13 +102,13 @@
     const i = state.viewed;
     const stored = i != null ? state.decoded[i] : null;
     if (!stored) { el.innerHTML = '<div class="empty">Click a program to see its details.</div>'; return; }
-    const edits = state.edit && state.edit.prog === i && i === state.current ? state.edit.values : {};
-    const p = withEdits(stored, edits);
+    const edits = i === state.current ? progEdits.of(i) : {};
+    const p = E.withEdits(stored, edits);
 
     // One labelled box, like the old editor: caption above, black LCD value below.
     const field = (caption, value) => `<div class="field"><div class="cap">${esc(caption)}</div><div class="val">${esc(value)}</div></div>`;
     const editor = (caption, key) => {
-      const f = EDITABLE[key];
+      const f = FIELDS[key];
       // Keep a stored value the dropdown doesn't offer (e.g. a Long Ribbon key below/above C..B) selectable.
       const options = f.options.some(([v]) => v === p[key]) ? f.options : [...f.options, [p[key], f.text ? f.text(p[key]) : String(p[key])]];
       const opts = options.map(([v, name]) => `<option value="${v}"${v === p[key] ? ' selected' : ''}>${esc(name)}</option>`).join('');
@@ -194,8 +135,6 @@
         `<button class="shift" data-shift="1" title="Rotate the pattern one step right">▶</button>` +
         `<div class="steps">${steps}</div></div></div>`;
     };
-    const section = (title, body, extra = '') =>
-      `<section class="sect${extra}"><div class="sect-title">${title}</div><div class="sect-body">${body}</div></section>`;
 
     const anyEdits = Object.keys(edits).length > 0;
     const canSave = anyEdits && !state.busy;
@@ -246,14 +185,12 @@
 
   // GLOBAL page (GLOBAL button): channel/transpose dropdowns and the USER SCALE keyboard (cents per note), with its own SAVE.
   function globalPage() {
-    const anyEdits = Object.keys(state.globalEdit).length > 0;
+    const anyEdits = globalEdits.any;
     const head = `<div class="det-head"><div class="det-name">GLOBAL</div>` +
       `<button id="btn-save-global" class="save"${anyEdits && !state.busy ? '' : ' disabled'} ` +
       `title="${anyEdits ? 'Write the global settings to the keytar' : 'No changes to save'}">SAVE</button>` +
       `<button id="btn-close-global" class="icon close" title="Close the global settings" aria-label="Close">` +
       `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;
-    const section = (title, body, extra = '') =>
-      `<section class="sect${extra}"><div class="sect-title">${title}</div><div class="sect-body">${body}</div></section>`;
     // The IN / OUT port menus (filled by renderPorts). Shown before the keytar's data is read: they're how it gets found.
     const portField = (caption, id, tip) =>
       `<div class="field"><div class="cap">${caption}</div><select class="val" id="${id}" title="${esc(tip)}"></select></div>`;
@@ -261,7 +198,7 @@
       portField('IN', 'in-port', "The MIDI port the keytar's messages come in on (normally RK-100S KBD/RIBBON).") +
       portField('OUT', 'out-port', 'The MIDI port that goes to the keytar (normally RK-100S SOUND).'), ' grid2 span3');
     if (!state.global) return `${head}<div class="sect-grid">${ports}</div><div class="empty">Not read yet: connect the keytar (with SysEx both ways).</div>`;
-    const g = { ...R.decodeGlobal(state.global), ...state.globalEdit };
+    const g = globalEdits.view(R.decodeGlobal(state.global));
     const options = (key, cls = '') => {
       const f = GLOBAL_FIELDS[key];
       const list = f.options.some(([v]) => v === g[key]) ? f.options : [...f.options, [g[key], f.text ? f.text(g[key]) : String(g[key])]];
@@ -269,15 +206,15 @@
         list.map(([v, name]) => `<option value="${v}"${v === g[key] ? ' selected' : ''}>${esc(name)}</option>`).join('') + '</select>';
     };
     const gInput = (caption, key, unit) =>
-      `<div class="field${key in state.globalEdit ? ' modified' : ''}"><div class="cap">${esc(caption)}</div>` +
+      `<div class="field${globalEdits.has(key) ? ' modified' : ''}"><div class="cap">${esc(caption)}</div>` +
       `<div class="with-unit"><input class="val" type="text" inputmode="decimal" maxlength="5" data-gfield="${key}" ` +
       `value="${GLOBAL_FIELDS[key].text(g[key])}" title="430.0 to 450.0 Hz"><span class="unit">${unit}</span></div></div>`;
     const gEditor = (caption, key) =>
-      `<div class="field${key in state.globalEdit ? ' modified' : ''}"><div class="cap">${esc(caption)}</div>${options(key, 'val')}</div>`;
+      `<div class="field${globalEdits.has(key) ? ' modified' : ''}"><div class="cap">${esc(caption)}</div>${options(key, 'val')}</div>`;
     // One octave, C..B: white keys hold their value at the bottom, black keys (drawn over the gaps) at their own bottom.
     // Each box: the value drawn centred, with an invisible dropdown over it (iOS ignores text-align in a <select>).
     const box = (k) => { const key = `userScale${k}`;
-      return `<span class="cents${key in state.globalEdit ? ' modified' : ''}"><span class="num">${g[key]}</span>${options(key)}</span>`; };
+      return `<span class="cents${globalEdits.has(key) ? ' modified' : ''}"><span class="num">${g[key]}</span>${options(key)}</span>`; };
     const whites = [0, 2, 4, 5, 7, 9, 11].map((k) => `<div class="wkey">${box(k)}</div>`).join('');
     const blacks = [[1, 1], [3, 2], [6, 4], [8, 5], [10, 6]]
       .map(([k, gap]) => `<div class="bkey" style="--gap: ${gap}">${box(k)}</div>`).join('');
@@ -288,46 +225,34 @@
       // CC# MAP: which CC each switch/ribbon parameter sends and receives. Two columns (1~32, 33~64) like the Sound Editor.
       section('CC# MAP', R.CC_MAP_NAMES.map((n, k) => {
         const key = `ccMap${k}`;
-        return `<div class="field ccrow${key in state.globalEdit ? ' modified' : ''}"><span class="name">${esc(n)}</span>${options(key, 'val')}</div>`;
+        return `<div class="field ccrow${globalEdits.has(key) ? ' modified' : ''}"><span class="name">${esc(n)}</span>${options(key, 'val')}</div>`;
       }).join(''), ' ccmap span3') +
       `</div>`;
   }
 
   function setGlobalField(key, v) {
-    const stored = R.decodeGlobal(state.global)[key];
-    if (v === stored) delete state.globalEdit[key]; else state.globalEdit[key] = v;
+    globalEdits.set(R.decodeGlobal(state.global), key, v);
     renderDetails();
   }
 
-  // Forget global edits that the stored data now has anyway (after a save or a fresh global dump).
-  function pruneGlobalEdits() {
-    const g = R.decodeGlobal(state.global);
-    for (const k of Object.keys(state.globalEdit)) if (state.globalEdit[k] === g[k]) delete state.globalEdit[k];
-  }
-
   // SAVE GLOBAL: read the keytar's global data fresh (so favorites etc. changed on the keytar are kept), patch the
-  // edited fields in, send it as GLOBAL DATA DUMP (51, 195 bytes), wait for the ACK, then read it back and check.
+  // edited fields in, send it as GLOBAL DATA DUMP (51, 196 bytes), wait for the ACK, then read it back and check.
   async function saveGlobal() {
-    if (state.busy || !Object.keys(state.globalEdit).length) return;
-    if (!midi.identified) await handshake();
-    if (!midi.identified) {
-      setStatus('Cannot save: no SysEx is coming back from the keytar. Route the keytar\'s MIDI (with SysEx) into this plugin.');
-      return;
-    }
-    const edits = { ...state.globalEdit };
+    if (state.busy || !globalEdits.any) return;
+    if (!(await canSave())) return;
+    const edits = { ...globalEdits.values };
     state.busy = true; renderButtons(); renderDetails();
-    const step = async (what, promise) => { try { return await promise; } catch (e) { throw new Error(`no reply ${what}`); } };
-    const readGlobal = () => request(R.msg.globalDumpRequest(midi.channel), (x) => x.type === 'global');
+    const readGlobal = () => request(R.msg.globalDumpRequest(link.channel), (x) => x.type === 'global');
     try {
       setStatus('Saving global settings…');
-      const fresh = await step('when reading the global settings', readGlobal());
+      const fresh = await replyTo('when reading the global settings', readGlobal());
       const data = R.encodeGlobal(fresh.data, edits);
-      const reply = await step('to the global dump (long SysEx may not get through this host)',
-        request(R.msg.globalDump(midi.channel, data), (x) => ['ack', 'nak', 'format-error'].includes(x.type), { timeout: 3000, retries: 0 }));
+      const reply = await replyTo('to the global dump (long SysEx may not get through this host)',
+        request(R.msg.globalDump(link.channel, data), (x) => ['ack', 'nak', 'format-error'].includes(x.type), { timeout: 3000, retries: 0 }));
       if (reply.type !== 'ack') throw new Error(`the keytar refused the global data (${reply.type})`);
-      const back = await step('when reading the global settings back', readGlobal());
+      const back = await replyTo('when reading the global settings back', readGlobal());
       setGlobal(back.data); // drops the edits the keytar now has; any left over didn't land
-      const missing = Object.keys(state.globalEdit);
+      const missing = Object.keys(globalEdits.values);
       if (missing.length) throw new Error(`the keytar doesn't have the change (${missing.map((k) => GLOBAL_FIELDS[k].label).join(', ')})`);
       setStatus('Saved the global settings.');
     } catch (e) {
@@ -342,7 +267,7 @@
     state.global = data;
     ({ favorites: state.favorites, progChgFilter: state.progChgOn } = R.decodeGlobal(data));
     state.progChgOn = !!state.progChgOn;
-    pruneGlobalEdits();
+    globalEdits.prune(R.decodeGlobal(data));
     persist();
   }
 
@@ -363,30 +288,19 @@
   // Select the program on the keytar: Bank MSB 0, Bank LSB 0/1, Program Change on the global channel.
   // scroll: bring the row into view (favorites can point anywhere in the list).
   function selectOnKeytar(i, { scroll = false } = {}) {
-    if (!midi.connected) { view(i); if (scroll) scrollToRow(i); setStatus('Not connected: only showing the details.'); return; }
-    R.msg.programChange(midi.channel, i).forEach(send);
+    if (!link.connected) { view(i); if (scroll) scrollToRow(i); setStatus('Not connected: only showing the details.'); return; }
+    R.msg.programChange(link.channel, i).forEach(send);
     setCurrent(i, { scroll });
     if (!state.progChgOn) setStatus('Program Change is disabled in the keytar\'s global settings, so it will ignore this.');
-  }
-
-  // Remember (or forget, when back to the stored value) an edit-buffer change.
-  function noteEdit(i, key, v) {
-    if (!state.edit || state.edit.prog !== i) state.edit = { prog: i, values: {} };
-    const d = state.decoded[i];
-    const base = key === 'arp' ? arpValue(d) : d[key];
-    if (v === base) delete state.edit.values[key]; else state.edit.values[key] = v;
   }
 
   // Change a field in the keytar's edit buffer (PARAMETER CHANGE, func 41h).
   // Like turning a knob on the keytar: lost on the next program change unless written on the keytar.
   function setField(i, key, v) {
-    const f = EDITABLE[key];
-    if (!midi.connected) { setStatus('Not connected: cannot change it.'); renderDetails(); return; }
+    if (!link.connected) { setStatus('Not connected: cannot change it.'); renderDetails(); return; }
     if (i !== state.current) selectOnKeytar(i); // the edit buffer must hold this program first
-    const p = withEdits(state.decoded[i], state.edit && state.edit.prog === i ? state.edit.values : {});
-    const msgs = f.messages ? f.messages(v, p) : [[...f.param, v]];
-    msgs.forEach(([id, sub, val]) => send(R.msg.parameterChange(midi.channel, id, sub, val)));
-    (f.keys ? f.keys(p) : [key]).forEach((k) => noteEdit(i, k, v));
+    progEdits.change(i, state.decoded[i], key, v)
+      .forEach(([id, sub, val]) => send(R.msg.parameterChange(link.channel, id, sub, val)));
     renderDetails();
   }
 
@@ -396,33 +310,28 @@
   // message, so it also gets through AUv3 hosts that choke on long outgoing SysEx. Then read the slot back
   // and check every edited field landed.
   async function saveProgram() {
-    const i = state.edit && state.edit.prog;
+    const i = progEdits.prog;
     if (i == null || i !== state.current || state.busy) return;
-    if (!midi.identified) await handshake(); // saving needs SysEx both ways
-    if (!midi.identified) {
-      setStatus('Cannot save: no SysEx is coming back from the keytar. Route the keytar\'s MIDI (with SysEx) into this plugin.');
-      return;
-    }
-    const edits = { ...state.edit.values };
+    if (!(await canSave())) return;
+    const edits = { ...progEdits.values };
     state.busy = true; renderButtons(); renderDetails();
-    const step = async (what, promise) => { try { return await promise; } catch (e) { throw new Error(`no reply ${what}`); } };
     try {
       setStatus(`Saving program ${pad3(i + 1)}…`);
       // A write must not be retried blindly: one attempt, wait for WRITE COMPLETED / WRITE ERROR.
-      const reply = await step('to the write request', request(R.msg.programWriteRequest(midi.channel, i),
+      const reply = await replyTo('to the write request', request(R.msg.programWriteRequest(link.channel, i),
         (x) => ['write-ok', 'write-error', 'nak', 'format-error'].includes(x.type), { timeout: 3000, retries: 0 }));
       if (reply.type !== 'write-ok') throw new Error(`the keytar refused the write (${reply.type}; is memory protect on?)`);
-      const back = await step('when reading the program back', request(R.msg.programDumpRequest(midi.channel, i),
+      const back = await replyTo('when reading the program back', request(R.msg.programDumpRequest(link.channel, i),
         (x) => x.type === 'program' && x.number === i));
       const d = R.decodeProgram(back.data);
-      const missing = Object.keys(edits).filter((k) => (k === 'arp' ? arpValue(d) : d[k]) !== edits[k]);
+      const missing = E.missingEdits(edits, d);
       if (missing.length) {
         await checkWrongSlot(i);
-        throw new Error(`program ${pad3(i + 1)} on the keytar doesn't have the change (${missing.map(editLabel).join(', ')})`);
+        throw new Error(`program ${pad3(i + 1)} on the keytar doesn't have the change (${missing.map(E.editLabel).join(', ')})`);
       }
       state.programs[i] = back.data;
       state.decoded[i] = d;
-      state.edit = null;
+      progEdits.clear();
       persist();
       renderList(); markRows(); renderFavorites();
       setStatus(`Saved program ${pad3(i + 1)}.`);
@@ -438,16 +347,16 @@
   async function checkWrongSlot(i) {
     const j = i & 0x7F;
     if (j === i || !state.programs[j]) return;
-    const m = await request(R.msg.programDumpRequest(midi.channel, j), (x) => x.type === 'program' && x.number === j);
+    const m = await request(R.msg.programDumpRequest(link.channel, j), (x) => x.type === 'program' && x.number === j);
     if (sameBytes(m.data, state.programs[j])) return;
-    await request(R.msg.programDumpPacked(midi.channel, j, R.pack7(Array.from(state.programs[j]))),
+    await request(R.msg.programDumpPacked(link.channel, j, R.pack7(Array.from(state.programs[j]))),
       (x) => ['ack', 'nak', 'format-error'].includes(x.type), { timeout: 3000, retries: 0 });
     setStatus(`Program ${pad3(j + 1)} was overwritten by mistake and has been restored.`);
   }
 
   function setCurrent(i, { scroll = true } = {}) {
     state.current = i;
-    state.edit = null; // a program change reloads the stored program
+    progEdits.clear(); // a program change reloads the stored program
     state.viewed = i; // details follow the keytar
     markRows(); renderFavorites(); renderDetails();
     if (scroll) scrollToRow(i);
@@ -477,236 +386,53 @@
     } catch (e) { console.warn(e); }
   }
 
-  // ------------------------------------------------------------ MIDI
-  function send(bytes) { if (midi.output) midi.output.send(bytes); }
-
-  function onMidiMessage(ev) {
-    const d = ev.data;
-    if (d[0] === 0xF0) {
-      const m = R.parseSysex(d);
-      if (!m) return;
-      if (m.type !== 'identity-other' && m.channel != null && !midi.identified) markIdentified(m.channel);
-      if (midi.waiter && midi.waiter.match(m)) {
-        const w = midi.waiter; midi.waiter = null; clearTimeout(w.timer); w.resolve(m);
-        return;
-      }
-      if (m.type === 'param' && state.current != null && state.decoded[state.current]) {
-        // A field changed on the keytar itself.
-        const is = ([id, sub]) => m.id === id && m.sub === sub;
-        const cur = state.current;
-        const edits = state.edit && state.edit.prog === cur ? state.edit.values : {};
-        const arpNow = 'arp' in edits ? edits.arp : arpValue(state.decoded[cur]);
-        if (is(R.PARAM.ARP_ON)) {
-          // ARP button: on restores the last known type.
-          noteEdit(cur, 'arp', m.value ? (arpNow >= 0 ? arpNow : state.decoded[cur].arpType) : -1);
-        } else if (is(R.PARAM.ARP_TYPE)) {
-          if (arpNow >= 0) noteEdit(cur, 'arp', m.value);
-        } else if (is(R.PARAM.T1_LONG_RIBBON_FILTER_INT)) {
-          noteEdit(cur, 't1FilterInt', m.value);
-        } else if (is(R.PARAM.T2_LONG_RIBBON_FILTER_INT)) {
-          noteEdit(cur, 't2FilterInt', m.value);
-        } else {
-          const key = Object.keys(EDITABLE).find((k) => EDITABLE[k].param && is(EDITABLE[k].param));
-          if (!key) return;
-          noteEdit(cur, key, m.value);
-        }
-        renderDetails();
-        return;
-      }
-      // Unsolicited dumps (e.g. from the keytar's MIDI dump page, or after editing favorites).
-      if (m.type === 'global') {
-        setGlobal(m.data);
-        renderFavorites(); renderDetails();
-        setStatus('Global settings updated from the keytar.');
-      } else if (m.type === 'program' && m.number < R.NUM_PROGRAMS && state.programs.length) {
-        state.programs[m.number] = m.data;
-        state.decoded[m.number] = R.decodeProgram(m.data);
-        persist(); renderAll();
-        setStatus(`Program ${pad3(m.number + 1)} updated from the keytar.`);
-      }
+  // ------------------------------------------------------------ MIDI (the connection itself is RkLink, rk-link.js)
+  // SysEx from the keytar that no request was waiting for.
+  function onKeytarSysex(m) {
+    if (m.type === 'param' && state.current != null && state.decoded[state.current]) {
+      // A field changed on the keytar itself.
+      if (progEdits.fromKeytar(state.current, state.decoded[state.current], m)) renderDetails();
       return;
     }
-    // Program changes made on the keytar: Bank LSB (CC#32) then Program Change.
-    const status = d[0] & 0xF0;
-    if (status === 0xB0 && d[1] === 0x20) midi.bank = d[2];
-    if (status === 0xC0) {
-      const prog = midi.bank * 128 + d[1];
-      if (prog < R.NUM_PROGRAMS) setCurrent(prog);
+    // Unsolicited dumps (e.g. from the keytar's MIDI dump page, or after editing favorites).
+    if (m.type === 'global') {
+      setGlobal(m.data);
+      renderFavorites(); renderDetails();
+      setStatus('Global settings updated from the keytar.');
+    } else if (m.type === 'program' && m.number < R.NUM_PROGRAMS && state.programs.length) {
+      state.programs[m.number] = m.data;
+      state.decoded[m.number] = R.decodeProgram(m.data);
+      persist(); renderAll();
+      setStatus(`Program ${pad3(m.number + 1)} updated from the keytar.`);
     }
   }
 
-  function request(bytes, match, { timeout = 1500, retries = 2 } = {}) {
-    return new Promise((resolve, reject) => {
-      let attempt = 0;
-      const tryOnce = () => {
-        midi.waiter = {
-          match, resolve,
-          timer: setTimeout(() => {
-            midi.waiter = null;
-            if (attempt++ < retries) tryOnce(); else reject(new Error('No reply from the RK-100S'));
-          }, timeout),
-        };
-        send(bytes);
-      };
-      tryOnce();
-    });
-  }
-
-  async function initMidi() {
-    if (!navigator.requestMIDIAccess) { setStatus('No Web MIDI here.'); return; }
-    try {
-      midi.access = await navigator.requestMIDIAccess({ sysex: true });
-    } catch (e) { setStatus(`MIDI access denied (${e.message}). Allow MIDI/SysEx and reload.`); return; }
-    midi.access.onstatechange = () => {
-      if (midi.connected && (midi.input.state === 'disconnected' || midi.output.state === 'disconnected')) {
-        disconnect(); setStatus('The MIDI device was disconnected.');
-      }
-      autoConnect(); // a device may have just appeared
-    };
-  }
-
-  // The ports of a MIDIInputMap / MIDIOutputMap. Walked with next() by hand: the iOS "Web MIDI Browser" app's maps give
-  // an iterator that isn't iterable, so Array.from(map.values()) comes back empty there (no ports found).
-  function portsOf(map) {
-    const out = [];
-    if (!map) return out;
-    const it = map.values();
-    for (let o = it.next(); !o.done; o = it.next()) out.push(o.value);
-    return out;
-  }
-
-  // Ports are kept apart by id: two can share a name (in the iOS Web MIDI Browser app every Bluetooth port is just
-  // "Bluetooth"). A name shared by several ports is shown with a number, in port order ("Bluetooth 1", "Bluetooth 2").
-  const live = (map) => portsOf(map).filter((p) => p.state !== 'disconnected');
-  function labelOf(list, p) {
-    const same = list.filter((q) => q.name === p.name);
-    return same.length > 1 ? `${p.name} ${same.indexOf(p) + 1}` : p.name;
-  }
-
-  // The IN / OUT PORT menus: "auto" or a port the user picked, saved by id and name (the id first; a name only when
-  // one port has it, as ids can change between sessions). A saved port that isn't connected now isn't listed, but it
-  // stays saved and is picked up again when it comes back.
-  const PORTS_KEY = 'rk100s-ports';
-  const portChoice = (() => {
-    try { return JSON.parse(localStorage.getItem(PORTS_KEY) || 'null') || {}; } catch (e) { return {}; }
-  })();
-  function saveChoice() { try { localStorage.setItem(PORTS_KEY, JSON.stringify(portChoice)); } catch (e) { /* private mode */ } }
-  function chosen(list, c) {
-    if (!c) return null;
-    const same = list.filter((p) => p.name === c.name);
-    return list.find((p) => String(p.id) === String(c.id)) || (same.length === 1 ? same[0] : null);
-  }
-
-  // Ports to use: the ones picked in the menus; otherwise the keytar's own ports by name
-  // (In "RK-100S KBD/RIBBON", Out "RK-100S SOUND"), otherwise the first connected port.
-  function pickPorts() {
-    const pick = (list, c, prefer) => {
-      const rk = list.filter((p) => /RK-?100S/i.test(p.name));
-      return chosen(list, c) || rk.find((p) => prefer.test(p.name)) || rk[0] || list[0] || null;
-    };
-    return { input: pick(live(midi.access.inputs), portChoice.input, /KBD|RIBBON/i),
-      output: pick(live(midi.access.outputs), portChoice.output, /SOUND/i) };
-  }
-
+  // The IN / OUT PORT menus: "auto" or a port the user picked. They're on the GLOBAL page only; not there otherwise.
   function renderPorts() {
-    const fill = (el, list, cur, c) => {
-      const missing = c && !chosen(list, c);
+    if (!link.access || !$('in-port')) return;
+    const fill = (el, kind) => {
+      const m = link.menu(kind);
       el.innerHTML = '<option value="">auto</option>' +
-        (missing ? `<option value="saved" disabled>${esc(c.name)} (not connected)</option>` : '') +
-        list.map((p) => `<option value="${esc(p.id)}">${esc(labelOf(list, p))}</option>`).join('');
-      // The menu shows the choice, not the port in use: that one is null while a newly picked port is still opening
-      // (and port changes re-render meanwhile), which made a pick read "auto" again.
-      el.value = missing ? 'saved' : c ? String(chosen(list, c).id) : '';
+        (m.missing != null ? `<option value="saved" disabled>${esc(m.missing)} (not connected)</option>` : '') +
+        m.ports.map((p) => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('');
+      el.value = m.value;
     };
-    // The menus are on the GLOBAL page only; not there otherwise.
-    if (!midi.access || !$('in-port')) return;
-    fill($('in-port'), live(midi.access.inputs), midi.input, portChoice.input);
-    fill($('out-port'), live(midi.access.outputs), midi.output, portChoice.output);
-  }
-
-  function onPortMenu(kind, map) {
-    return (e) => {
-      if (!midi.access) return;
-      const p = live(map()).find((q) => String(q.id) === e.target.value);
-      portChoice[kind] = p ? { id: p.id, name: p.name } : null;
-      saveChoice();
-      autoConnect();
-      renderPorts();
-    };
-  }
-  const onInPort = onPortMenu('input', () => midi.access.inputs), onOutPort = onPortMenu('output', () => midi.access.outputs);
-
-  function autoConnect() {
-    if (!midi.access) return;
-    renderPorts();
-    if (midi.connecting) return;
-    const { input, output } = pickPorts();
-    if (midi.connected) {
-      // Switch over if better ports showed up (e.g. the keytar was plugged in after another device).
-      // By id: some hosts hand out new port objects on each lookup.
-      const same = (a, b) => a && b && String(a.id) === String(b.id);
-      if (same(input, midi.input) && same(output, midi.output)) return;
-      disconnect();
-    }
-    if (input && output) connect(input, output).catch((e) => { setConn("Can't open port", "warn"); setStatus(String(e.message || e)); }).finally(renderPorts);
-    else { setConn('No MIDI device', 'off'); setStatus(`Waiting for a MIDI ${!input && !output ? 'device' : !input ? 'input' : 'output'}… (the ports are on the GLOBAL page)`); }
+    fill($('in-port'), 'input');
+    fill($('out-port'), 'output');
   }
 
   function renderButtons() {
-    $('btn-reload').disabled = !midi.connected || state.busy;
+    $('btn-reload').disabled = !link.connected || state.busy;
     const what = state.programs.length ? 'Reload' : 'Load programs';
     $('btn-reload').title = `${what}: receive all programs and favorites from the keytar`;
     $('btn-reload').setAttribute('aria-label', what);
   }
 
-  function disconnect() {
-    if (midi.input) midi.input.onmidimessage = null;
-    midi.input = midi.output = null; midi.connected = false; midi.identified = false;
-    setConn('Not connected', 'off');
-    renderButtons();
-  }
-
-  // The keytar answered something on channel ch: it's there and SysEx works both ways.
-  function markIdentified(ch, version) {
-    midi.channel = ch;
-    if (version) midi.version = version;
-    if (!midi.identified || version) setConn(`${midi.version ? `v${midi.version} · ` : ''}ch ${ch + 1}`, 'on');
-    midi.identified = true;
-    $('conn-status').title = `In: ${midi.input?.name} · Out: ${midi.output?.name}`;
-  }
-
-  async function connect(input, output) {
-    midi.connecting = true;
-    try { await Promise.all([input.open(), output.open()]); } finally { midi.connecting = false; }
-    midi.input = input; midi.output = output;
-    input.onmidimessage = onMidiMessage;
-    midi.connected = true;
-    $('conn-status').title = `In: ${input.name} · Out: ${output.name}`;
-    renderButtons();
-    await handshake();
-  }
-
-  // Find the keytar's global channel. Device Inquiry first; if that gets no answer (some hosts
-  // drop universal SysEx), ask for the edit buffer on channel 1, the default global channel.
+  // Find the keytar, then read what the page shows from it.
   async function handshake() {
-    setConn('Searching…', 'warn');
-    try {
-      const id = await request(R.msg.identityRequest(), (m) => m.type === 'identity', { timeout: 1000, retries: 1 });
-      markIdentified(id.channel, id.version);
-    } catch (e) {
-      try {
-        const m = await request(R.msg.currentProgramDumpRequest(0), (x) => x.type === 'current-program', { timeout: 1000, retries: 1 });
-        markIdentified(m.channel);
-      } catch (e2) {
-        if (!midi.identified) {
-          setConn('Send only', 'warn');
-          setStatus(`No SysEx from the keytar on "${midi.input.name}". Program changes are still sent; loading programs needs the keytar's MIDI (with SysEx) routed in. The IN and OUT ports are on the GLOBAL page.`);
-        }
-        return;
-      }
-    }
+    if (!(await link.identify())) return;
     // Global settings (and favorites) are small: read them on every connect, even before the programs are loaded.
-    try { setGlobal((await request(R.msg.globalDumpRequest(midi.channel), (x) => x.type === 'global', { retries: 0 })).data); } catch (e) { /* not critical */ }
+    try { setGlobal((await request(R.msg.globalDumpRequest(link.channel), (x) => x.type === 'global', { retries: 0 })).data); } catch (e) { /* not critical */ }
     renderFavorites(); renderDetails();
     if (state.programs.length) {
       await findCurrentProgram();
@@ -720,14 +446,14 @@
 
   async function receiveAll() {
     if (state.busy) return;
-    if (!midi.identified) { await handshake(); if (!midi.identified) return; }
+    if (!link.identified) { await handshake(); if (!link.identified) return; }
     state.busy = true; renderButtons();
     try {
       setStatus('Receiving favorites…');
-      const g = await request(R.msg.globalDumpRequest(midi.channel), (x) => x.type === 'global');
+      const g = await request(R.msg.globalDumpRequest(link.channel), (x) => x.type === 'global');
       const programs = [];
       for (let i = 0; i < R.NUM_PROGRAMS; i++) {
-        const m = await request(R.msg.programDumpRequest(midi.channel, i), (x) => x.type === 'program' && x.number === i);
+        const m = await request(R.msg.programDumpRequest(link.channel, i), (x) => x.type === 'program' && x.number === i);
         programs.push(m.data);
         if (i % 10 === 9) setStatus(`Receiving programs… ${i + 1}/200`);
       }
@@ -749,7 +475,7 @@
   // look for the stored program with identical data. Works unless the sound has been edited.
   async function findCurrentProgram() {
     try {
-      const m = await request(R.msg.currentProgramDumpRequest(midi.channel), (x) => x.type === 'current-program', { retries: 0 });
+      const m = await request(R.msg.currentProgramDumpRequest(link.channel), (x) => x.type === 'current-program', { retries: 0 });
       const same = (a) => a.length === m.data.length && a.every((b, k) => b === m.data[k]);
       const hits = state.programs.map((p, i) => (same(p) ? i : -1)).filter((i) => i >= 0);
       if (hits.length === 1) { state.current = hits[0]; state.viewed = hits[0]; }
@@ -773,21 +499,16 @@
     if (e.target.closest('#btn-close-global')) { state.page = 'program'; renderDetails(); return; }
     const i = state.viewed;
     if (i == null || !state.decoded[i]) return;
-    const p = withEdits(state.decoded[i], state.edit && state.edit.prog === i ? state.edit.values : {});
+    const p = progEdits.view(i, state.decoded[i]);
     const step = e.target.closest('[data-step]');
     if (step) { const key = `arpStep${step.dataset.step}`; setField(i, key, p[key] ? 0 : 1); return; }
     const shift = e.target.closest('[data-shift]');
-    if (shift) {
-      // Rotate the steps up to the last step; only the steps that change are sent.
-      const n = p.arpLastStep + 1, d = +shift.dataset.shift;
-      const cur = Array.from({ length: n }, (_, k) => p[`arpStep${k}`]);
-      const next = cur.map((_, k) => cur[(k - d + n) % n]);
-      next.forEach((v, k) => { if (v !== cur[k]) setField(i, `arpStep${k}`, v); });
-    }
+    // Rotate the steps up to the last step; only the steps that change are sent.
+    if (shift) E.rotateSteps(p, +shift.dataset.shift).forEach(([k, v]) => setField(i, k, v));
   };
   $('details').onchange = (e) => {
-    if (e.target.id === 'in-port') { onInPort(e); return; }
-    if (e.target.id === 'out-port') { onOutPort(e); return; }
+    if (e.target.id === 'in-port') { link.choose('input', e.target.value); return; }
+    if (e.target.id === 'out-port') { link.choose('output', e.target.value); return; }
     const gkey = e.target.dataset.gfield;
     if (gkey && GLOBAL_FIELDS[gkey].input) {
       // Text field: only a valid value becomes an edit; leaving it with an invalid one puts the last valid value back.
@@ -823,5 +544,5 @@
 
   restore();
   renderAll();
-  initMidi().then(autoConnect);
+  link.init().then(() => link.autoConnect());
 })();
