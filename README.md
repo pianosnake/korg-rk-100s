@@ -1,5 +1,7 @@
 # KORG RK-100S Programs
 
+Live at https://pianosnake.github.io/korg-rk-100s/
+
 A Web MIDI page for the KORG RK-100S keytar. It lists the keytar's 200 programs and favorites, selects programs, and edits the program's arpeggiator, scale and ribbon settings, along with the global settings. It has no libraries and needs no network access.
 
 ## Features
@@ -26,10 +28,7 @@ The page needs a browser with Web MIDI and SysEx. Allow both when the browser as
 
 1. Install [MIDIWeb](https://midiweb.app/) (iPadOS 17 and later) or [Web MIDI Browser](https://apps.apple.com/us/app/web-midi-browser/id953846217), which also runs on older iPads.
 2. Connect the RK-100S with a USB cable and a Lightning or USB-C adapter.
-3. Put the page somewhere the iPad can reach, either:
-   - on a web host (for example GitHub Pages), or
-   - from a computer on the same Wi-Fi
-4. Open that address in the app.
+3. Open https://pianosnake.github.io/korg-rk-100s/ in the app (or the page served from a computer on the same Wi-Fi).
 
 ## Ports
 
