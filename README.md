@@ -17,9 +17,9 @@ The page needs a browser with Web MIDI and SysEx. Allow both when the browser as
 
 1. Connect the RK-100S with a USB cable.
 2. Start a web server in this folder and open http://localhost:8000 in Chrome:
-```
-python3 -m http.server 8000
-```
+   ```
+   python3 -m http.server 8000
+   ```
 3. Allow MIDI device control (with SysEx) when Chrome asks.
 
 ### On an iPad (MIDIWeb or Web MIDI Browser)
