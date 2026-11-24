@@ -2,7 +2,7 @@
 
 Live at https://pianosnake.github.io/korg-rk-100s/
 
-A Web MIDI page for the KORG RK-100S keytar. It lists the keytar's 200 programs and favorites, selects programs, and edits the program's arpeggiator, scale and ribbon settings, along with the global settings. It has no libraries and needs no network access.
+A lite Web MIDI version of the Korg Sound Editor for the KORG RK-100S keytar. It lists the keytar's 200 programs and favorites, selects programs, and edits the program's arpeggiator, scale and ribbon settings, along with the global settings. It has no libraries and needs no network access.
 
 ![A program's settings: arpeggiator with step edit, scale and ribbons](images/program.png)
 
