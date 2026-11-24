@@ -1,4 +1,4 @@
-# KORG RK-100S Programs
+# KORG RK-100S Sound Editor in HTML
 
 Live at https://pianosnake.github.io/korg-rk-100s/
 
